@@ -28,7 +28,10 @@ BOT_TOKEN = '8841315782:AAFfEUUFNOKl1PdgjbZuDpqrJUkep6-a1A8'
 ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 
-# ========== ЛИМИТЫ ==========
+# ========== НАСТРОЙКИ ==========
+DEMO_MODE = False  # True — демо-режим (бесплатно), False — реальная оплата
+
+# ========== ЛИМИТЫ И ЦЕНЫ ==========
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
 
@@ -115,8 +118,8 @@ TRANSLATIONS = {
         'premium_features': '🔥 Что даёт премиум:\n• ♾ Безлимитный поиск (5 и 6 букв)\n• 🚀 Приоритетная генерация\n• 🎁 Бонусные промокоды',
         'choose_days': 'Выберите срок:',
         'buy_premium': '📅 {days} дней — {price} ⭐',
-        'confirm_payment': '💎 Оплата премиума\n\n📅 Срок: {days} дней\n💰 Цена: {price} ⭐\n\nНажмите кнопку ниже для активации:',
-        'pay_stars': '⭐ Активировать (демо)',
+        'confirm_payment': '💎 Оплата премиума\n\n📅 Срок: {days} дней\n💰 Цена: {price} ⭐\n\nНажмите кнопку ниже для оплаты:',
+        'pay_stars': '⭐ Оплатить звёздами',
         'payment_success': '✅ Премиум активирован на {days} дней!\n\n⏳ Действует до: {expiry}\n\n🔓 Открыт безлимитный поиск!',
         'promo_title': '🎟 Промокоды\n\nВведите промокод в чат.\n\nПример: /promo ABC12345',
         'promo_success': '✅ Промокод активирован!\n\n🎁 Получен премиум на {days} дней!\n⏳ Действует до: {expiry}\n\n🔓 Теперь у вас безлимитный поиск!',
@@ -140,7 +143,10 @@ TRANSLATIONS = {
         'premium_already': '✅ У вас уже есть премиум!',
         'friends': '👥 Друзья',
         'referral_friends': '👥 Список приглашённых:',
-        'no_referral_friends': 'Пока никого не пригласили'
+        'no_referral_friends': 'Пока никого не пригласили',
+        'fragment_detected': 'обнаружен ✅',
+        'fragment_not_detected': 'не обнаружен ❌',
+        'fragment_error': 'не удалось проверить ⚠️'
     },
     'en': {
         'welcome': '🌸 Welcome! This bot helps you find cool usernames! 💎',
@@ -185,8 +191,8 @@ TRANSLATIONS = {
         'premium_features': '🔥 What premium gives:\n• ♾ Unlimited search (5 and 6 letters)\n• 🚀 Priority generation\n• 🎁 Bonus promo codes',
         'choose_days': 'Choose duration:',
         'buy_premium': '📅 {days} days — {price} ⭐',
-        'confirm_payment': '💎 Premium Payment\n\n📅 Duration: {days} days\n💰 Price: {price} ⭐\n\nClick the button below to activate:',
-        'pay_stars': '⭐ Activate (demo)',
+        'confirm_payment': '💎 Premium Payment\n\n📅 Duration: {days} days\n💰 Price: {price} ⭐\n\nClick the button below to pay:',
+        'pay_stars': '⭐ Pay with Stars',
         'payment_success': '✅ Premium activated for {days} days!\n\n⏳ Valid until: {expiry}\n\n🔓 Unlimited search unlocked!',
         'promo_title': '🎟 Promo codes\n\nEnter promo code in chat.\n\nExample: /promo ABC12345',
         'promo_success': '✅ Promo code activated!\n\n🎁 Premium for {days} days received!\n⏳ Valid until: {expiry}\n\n🔓 Unlimited search unlocked!',
@@ -210,7 +216,10 @@ TRANSLATIONS = {
         'premium_already': '✅ You already have premium!',
         'friends': '👥 Friends',
         'referral_friends': '👥 Friends list:',
-        'no_referral_friends': 'No friends yet'
+        'no_referral_friends': 'No friends yet',
+        'fragment_detected': 'detected ✅',
+        'fragment_not_detected': 'not detected ❌',
+        'fragment_error': 'check failed ⚠️'
     }
 }
 
@@ -411,19 +420,17 @@ def check_fragment(username):
     try:
         url = f'https://fragment.com/username/{username}'
         response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            return 'обнаружен ✅' 
-        else:
-            return 'не обнаружен ❌'
+        return 'fragment_detected' if response.status_code == 200 else 'fragment_not_detected'
     except:
-        return 'не удалось проверить ⚠️'
+        return 'fragment_error'
 
-# ========== ОБРАБОТЧИКИ КОМАНД ==========
+# ========== ОСНОВНЫЕ ОБРАБОТЧИКИ ==========
 @bot.on(events.NewMessage(pattern='/start(?: (.*))?'))
 async def start(event):
     user_id = event.sender_id
     args = event.pattern_match.group(1)
     
+    # Обработка реферальной ссылки
     if args and args.isdigit():
         referrer_id = int(args)
         if referrer_id != user_id:
@@ -462,6 +469,9 @@ async def start(event):
         referrals[user_id] = {'invited': [], 'invited_by': None}
         save_data()
     
+    await send_main_menu(event, user_id, edit=False)
+
+async def send_main_menu(event, user_id, edit=True):
     premium_status = '✅ Активен' if has_premium(user_id) else '❌ Не активен'
     if get_lang(user_id) == 'en':
         premium_status = '✅ Active' if has_premium(user_id) else '❌ Not active'
@@ -486,101 +496,32 @@ async def start(event):
         [Button.inline(get_text(user_id, 'settings'), b'settings')],
         [Button.inline(get_text(user_id, 'referral'), b'referral')]
     ]
-    await event.respond(text, buttons=buttons)
+    
+    if edit:
+        await event.edit(text, buttons=buttons)
+    else:
+        await event.respond(text, buttons=buttons)
 
-# ========== КНОПКИ (CallbackQuery) ==========
+# ========== ОБРАБОТЧИК КНОПОК ==========
 @bot.on(events.CallbackQuery)
 async def callback(event):
     user_id = event.sender_id
     data = event.data.decode()
     
     if data == 'main_menu':
-        await start(event)
+        await send_main_menu(event, user_id)
         return
     
     if data == 'search':
-        settings = user_settings.get(user_id, {'length': 5, 'digits': False})
-        length = settings['length']
-        digits = settings['digits']
-        
-        can_search, limit, remaining_time = check_limit(user_id, length)
-        
-        if not can_search:
-            reset_dt, remaining = None, None
-            if user_id in user_searches and str(length) in user_searches[user_id]:
-                reset_time = user_searches[user_id][str(length)].get('reset_time')
-                if reset_time:
-                    reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
-                    remaining = reset_dt - datetime.now()
-            
-            if reset_dt:
-                if get_lang(user_id) == 'ru':
-                    time_str = format_time_ru(remaining)
-                else:
-                    time_str = format_time(remaining)
-                text = get_text(user_id, 'limit_reached', limit=limit, length=length, time=time_str, reset_time=reset_dt.strftime('%d.%m.%Y %H:%M'))
-            else:
-                text = get_text(user_id, 'limit_reached', limit=limit, length=length, time='24h', reset_time='')
-            
-            buttons = [
-                [Button.inline(get_text(user_id, 'premium_shop'), b'premium_shop')],
-                [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
-            ]
-            await event.edit(text, buttons=buttons)
-            return
-        
-        await event.edit(get_text(user_id, 'searching'))
-        
-        found = None
-        for _ in range(100):
-            username = generate_username(length, digits)
-            free = await is_username_free(username)
-            if free is True:
-                found = username
-                break
-            await asyncio.sleep(0.3)
-        
-        increment_search(user_id, length)
-        
-        if found:
-            fragment_status = check_fragment(found)
-            fav_list = user_favorites.get(user_id, [])
-            is_faved = found in fav_list
-            
-            remaining, _ = get_remaining_searches(user_id, length)
-            
-            if get_lang(user_id) == 'ru':
-                fragment_display = 'обнаружен ✅' if 'обнаружен' in fragment_status else 'не обнаружен ❌'
-            else:
-                fragment_display = 'detected ✅' if 'обнаружен' in fragment_status else 'not detected ❌'
-            
-            text = get_text(user_id, 'found', username=found, fragment=fragment_display, faved=get_text(user_id, 'faved_yes') if is_faved else get_text(user_id, 'faved_no'), count=len(fav_list))
-            text += '\n\n' + get_text(user_id, 'remaining', remaining=str(remaining))
-            
-            buttons = []
-            if is_faved:
-                buttons.append([Button.inline(get_text(user_id, 'remove_fav'), f'remove_fav_{found}'.encode())])
-            else:
-                if len(fav_list) < 5:
-                    buttons.append([Button.inline(get_text(user_id, 'add_fav'), f'add_fav_{found}'.encode())])
-                else:
-                    buttons.append([Button.inline(get_text(user_id, 'favorites_full'), b'favorites_full')])
-            
-            buttons.append([Button.inline(get_text(user_id, 'find_more'), b'search')])
-            buttons.append([Button.inline(get_text(user_id, 'favorites'), b'favorites')])
-            buttons.append([Button.inline(get_text(user_id, 'main_menu'), b'main_menu')])
-            
-            await event.edit(text, buttons=buttons)
-        else:
-            await event.edit(get_text(user_id, 'no_free'), buttons=[[Button.inline(get_text(user_id, 'settings'), b'settings')]])
+        await handle_search(event, user_id)
         return
     
     if data == 'favorites':
-        await show_favorites(event)
+        await show_favorites(event, user_id)
         return
     
     if data == 'premium_shop':
-        await show_premium_shop(event)
+        await show_premium_shop(event, user_id)
         return
     
     if data == 'promocode_menu':
@@ -588,95 +529,11 @@ async def callback(event):
         return
     
     if data == 'referral':
-        await show_referral(event)
+        await show_referral(event, user_id)
         return
     
     if data == 'settings':
-        settings = user_settings.get(user_id, {'length': 5, 'digits': False, 'lang': 'ru'})
-        length = settings['length']
-        digits = settings['digits']
-        lang = settings.get('lang', 'ru')
-        
-        text = get_text(user_id, 'settings_title') + '\n\n'
-        text += get_text(user_id, 'settings_length', length=length) + '\n'
-        text += get_text(user_id, 'settings_digits', digits=get_text(user_id, 'digits_on_text') if digits else get_text(user_id, 'digits_off_text')) + '\n'
-        text += get_text(user_id, 'settings_lang', lang='🇷🇺 Русский' if lang == 'ru' else '🇬🇧 English')
-        
-        buttons = [
-            [Button.inline(get_text(user_id, 'length_5') if length == 6 else get_text(user_id, 'length_6'), b'toggle_length')],
-            [Button.inline(get_text(user_id, 'digits_off') if digits else get_text(user_id, 'digits_on'), b'toggle_digits')],
-            [Button.inline(get_text(user_id, 'lang_ru') if lang == 'en' else get_text(user_id, 'lang_en'), b'toggle_lang')],
-            [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
-        ]
-        await event.edit(text, buttons=buttons)
-        return
-    
-    if data.startswith('add_fav_'):
-        username = data.replace('add_fav_', '')
-        fav_list = user_favorites.get(user_id, [])
-        if username not in fav_list and len(fav_list) < 5:
-            fav_list.append(username)
-            user_favorites[user_id] = fav_list
-            save_data()
-            await event.answer(f'⭐ {username} добавлен!' if get_lang(user_id) == 'ru' else f'⭐ {username} added!', alert=True)
-        await callback_search_result(event, username)
-        return
-    
-    if data.startswith('remove_fav_'):
-        username = data.replace('remove_fav_', '')
-        fav_list = user_favorites.get(user_id, [])
-        if username in fav_list:
-            fav_list.remove(username)
-            user_favorites[user_id] = fav_list
-            save_data()
-            await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
-        await callback_search_result(event, username)
-        return
-    
-    if data.startswith('remove_fav_from_list_'):
-        username = data.replace('remove_fav_from_list_', '')
-        fav_list = user_favorites.get(user_id, [])
-        if username in fav_list:
-            fav_list.remove(username)
-            user_favorites[user_id] = fav_list
-            save_data()
-            await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
-        await show_favorites(event)
-        return
-    
-    if data.startswith('buy_premium_'):
-        days = int(data.replace('buy_premium_', ''))
-        price = PREMIUM_PRICES.get(days)
-        if not price:
-            await event.answer('❌ Неверный срок!' if get_lang(user_id) == 'ru' else '❌ Invalid duration!', alert=True)
-            return
-        pending_payments[user_id] = {'days': days, 'price': price}
-        text = get_text(user_id, 'confirm_payment', days=days, price=price)
-        buttons = [
-            [Button.inline(get_text(user_id, 'pay_stars'), f'pay_stars_{days}'.encode())],
-            [Button.inline(get_text(user_id, 'back'), b'premium_shop')]
-        ]
-        await event.edit(text, buttons=buttons)
-        return
-    
-    if data.startswith('pay_stars_'):
-        days = int(data.replace('pay_stars_', ''))
-        if has_premium(user_id):
-            await event.answer(get_text(user_id, 'premium_already'), alert=True)
-            return
-        add_premium(user_id, days)
-        if user_id in referrals and referrals[user_id].get('invited_by'):
-            referrer_id = referrals[user_id]['invited_by']
-            add_premium(referrer_id, 5)
-            try:
-                username = event.sender.username or str(user_id)
-                await bot.send_message(referrer_id, get_text(referrer_id, 'referral_reward_purchase', username=username))
-            except:
-                pass
-        expiry_date = datetime.now() + timedelta(days=days)
-        await event.edit(get_text(user_id, 'payment_success', days=days, expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
-                         buttons=[[Button.inline(get_text(user_id, 'search'), b'search')],
-                                  [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]])
+        await show_settings(event, user_id)
         return
     
     if data == 'toggle_length':
@@ -703,30 +560,158 @@ async def callback(event):
                          buttons=[[Button.inline(get_text(user_id, 'back'), b'settings')]])
         return
     
+    if data == 'referral_friends':
+        await show_referral_friends(event, user_id)
+        return
+    
+    if data.startswith('add_fav_'):
+        username = data.replace('add_fav_', '')
+        fav_list = user_favorites.get(user_id, [])
+        if username not in fav_list and len(fav_list) < 5:
+            fav_list.append(username)
+            user_favorites[user_id] = fav_list
+            save_data()
+            await event.answer(f'⭐ {username} добавлен!' if get_lang(user_id) == 'ru' else f'⭐ {username} added!', alert=True)
+        await show_search_result(event, user_id, username)
+        return
+    
+    if data.startswith('remove_fav_'):
+        username = data.replace('remove_fav_', '')
+        fav_list = user_favorites.get(user_id, [])
+        if username in fav_list:
+            fav_list.remove(username)
+            user_favorites[user_id] = fav_list
+            save_data()
+            await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
+        if 'from_list' in data:
+            await show_favorites(event, user_id)
+        else:
+            await show_search_result(event, user_id, username)
+        return
+    
+    if data.startswith('remove_fav_from_list_'):
+        username = data.replace('remove_fav_from_list_', '')
+        fav_list = user_favorites.get(user_id, [])
+        if username in fav_list:
+            fav_list.remove(username)
+            user_favorites[user_id] = fav_list
+            save_data()
+            await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
+        await show_favorites(event, user_id)
+        return
+    
+    if data.startswith('buy_premium_'):
+        days = int(data.replace('buy_premium_', ''))
+        price = PREMIUM_PRICES.get(days)
+        if not price:
+            await event.answer('❌ Неверный срок!' if get_lang(user_id) == 'ru' else '❌ Invalid duration!', alert=True)
+            return
+        pending_payments[user_id] = {'days': days, 'price': price}
+        text = get_text(user_id, 'confirm_payment', days=days, price=price)
+        if DEMO_MODE:
+            text += '\n\n⚠️ ДЕМО-РЕЖИМ: оплата бесплатна!'
+        buttons = [
+            [Button.inline(get_text(user_id, 'pay_stars'), f'pay_stars_{days}'.encode())],
+            [Button.inline(get_text(user_id, 'back'), b'premium_shop')]
+        ]
+        await event.edit(text, buttons=buttons)
+        return
+    
+    if data.startswith('pay_stars_'):
+        days = int(data.replace('pay_stars_', ''))
+        if has_premium(user_id):
+            await event.answer(get_text(user_id, 'premium_already'), alert=True)
+            return
+        
+        if DEMO_MODE:
+            # Демо-режим: бесплатная активация
+            add_premium(user_id, days)
+            if user_id in referrals and referrals[user_id].get('invited_by'):
+                referrer_id = referrals[user_id]['invited_by']
+                add_premium(referrer_id, 5)
+                try:
+                    username = event.sender.username or str(user_id)
+                    await bot.send_message(referrer_id, get_text(referrer_id, 'referral_reward_purchase', username=username))
+                except:
+                    pass
+            expiry_date = datetime.now() + timedelta(days=days)
+            await event.edit(get_text(user_id, 'payment_success', days=days, expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
+                             buttons=[[Button.inline(get_text(user_id, 'search'), b'search')],
+                                      [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]])
+        else:
+            # Реальная оплата звёздами
+            # Здесь нужно интегрировать Telegram Stars API
+            await event.answer('⚠️ Реальная оплата в разработке' if get_lang(user_id) == 'ru' else '⚠️ Real payment in development', alert=True)
+        return
+    
     if data == 'favorites_full':
         await event.answer(get_text(user_id, 'favorites_full'), alert=True)
         return
-    
-    if data == 'referral_friends':
-        await show_referral_friends(event)
-        return
 
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ КНОПОК ==========
-async def callback_search_result(event, username):
-    user_id = event.sender_id
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ИНТЕРФЕЙСА ==========
+async def handle_search(event, user_id):
+    settings = user_settings.get(user_id, {'length': 5, 'digits': False})
+    length = settings['length']
+    digits = settings['digits']
+    
+    can_search, limit, remaining_time = check_limit(user_id, length)
+    
+    if not can_search:
+        reset_dt, remaining = None, None
+        if user_id in user_searches and str(length) in user_searches[user_id]:
+            reset_time = user_searches[user_id][str(length)].get('reset_time')
+            if reset_time:
+                reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
+                remaining = reset_dt - datetime.now()
+        
+        if reset_dt:
+            if get_lang(user_id) == 'ru':
+                time_str = format_time_ru(remaining)
+            else:
+                time_str = format_time(remaining)
+            text = get_text(user_id, 'limit_reached', limit=limit, length=length, time=time_str, reset_time=reset_dt.strftime('%d.%m.%Y %H:%M'))
+        else:
+            text = get_text(user_id, 'limit_reached', limit=limit, length=length, time='24h', reset_time='')
+        
+        buttons = [
+            [Button.inline(get_text(user_id, 'premium_shop'), b'premium_shop')],
+            [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
+        ]
+        await event.edit(text, buttons=buttons)
+        return
+    
+    await event.edit(get_text(user_id, 'searching'))
+    
+    found = None
+    for _ in range(100):
+        username = generate_username(length, digits)
+        free = await is_username_free(username)
+        if free is True:
+            found = username
+            break
+        await asyncio.sleep(0.3)
+    
+    increment_search(user_id, length)
+    
+    if found:
+        await show_search_result(event, user_id, found)
+    else:
+        await event.edit(get_text(user_id, 'no_free'), buttons=[[Button.inline(get_text(user_id, 'settings'), b'settings')]])
+
+async def show_search_result(event, user_id, username):
     fragment_status = check_fragment(username)
+    fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+    fragment_display = get_text(user_id, fragment_key)
+    
     fav_list = user_favorites.get(user_id, [])
     is_faved = username in fav_list
-
-    if get_lang(user_id) == 'ru':
-        fragment_display = 'обнаружен ✅' if 'обнаружен' in fragment_status else 'не обнаружен ❌'
-    else:
-        fragment_display = 'detected ✅' if 'обнаружен' in fragment_status else 'not detected ❌'
-
+    remaining, _ = get_remaining_searches(user_id, len(username))
+    
     text = get_text(user_id, 'found', username=username, fragment=fragment_display,
                     faved=get_text(user_id, 'faved_yes') if is_faved else get_text(user_id, 'faved_no'),
                     count=len(fav_list))
-
+    text += '\n\n' + get_text(user_id, 'remaining', remaining=str(remaining))
+    
     buttons = []
     if is_faved:
         buttons.append([Button.inline(get_text(user_id, 'remove_fav'), f'remove_fav_{username}'.encode())])
@@ -735,17 +720,16 @@ async def callback_search_result(event, username):
             buttons.append([Button.inline(get_text(user_id, 'add_fav'), f'add_fav_{username}'.encode())])
         else:
             buttons.append([Button.inline(get_text(user_id, 'favorites_full'), b'favorites_full')])
-
+    
     buttons.append([Button.inline(get_text(user_id, 'find_more'), b'search')])
     buttons.append([Button.inline(get_text(user_id, 'favorites'), b'favorites')])
     buttons.append([Button.inline(get_text(user_id, 'main_menu'), b'main_menu')])
-
+    
     await event.edit(text, buttons=buttons)
 
-async def show_favorites(event):
-    user_id = event.sender_id
+async def show_favorites(event, user_id):
     fav_list = user_favorites.get(user_id, [])
-
+    
     if not fav_list:
         text = get_text(user_id, 'no_favorites')
         buttons = [
@@ -754,7 +738,7 @@ async def show_favorites(event):
         ]
         await event.edit(text, buttons=buttons)
         return
-
+    
     text = get_text(user_id, 'favorites_title') + '\n\n'
     for i, username in enumerate(fav_list, 1):
         free = await is_username_free(username)
@@ -762,69 +746,84 @@ async def show_favorites(event):
             status = '🟢 Свободен' if free else '🔴 Занят'
         else:
             status = '🟢 Free' if free else '🔴 Taken'
-        fragment = check_fragment(username)
-        if get_lang(user_id) == 'ru':
-            fragment_display = 'обнаружен ✅' if 'обнаружен' in fragment else 'не обнаружен ❌'
-        else:
-            fragment_display = 'detected ✅' if 'обнаружен' in fragment else 'not detected ❌'
+        fragment_status = check_fragment(username)
+        fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+        fragment_display = get_text(user_id, fragment_key)
         text += f"{i}. @{username} — {status} | Fragment: {fragment_display}\n"
-
+    
     buttons = []
     for username in fav_list:
         buttons.append([Button.inline(f'🗑 Delete @{username}', f'remove_fav_from_list_{username}'.encode())])
-
+    
     buttons.append([Button.inline(get_text(user_id, 'search'), b'search')])
     buttons.append([Button.inline(get_text(user_id, 'main_menu'), b'main_menu')])
-
+    
     await event.edit(text, buttons=buttons)
 
-async def show_premium_shop(event):
-    user_id = event.sender_id
+async def show_premium_shop(event, user_id):
     has_prem = has_premium(user_id)
     remaining = get_premium_remaining(user_id) if has_prem else None
-
+    
     text = get_text(user_id, 'premium_title') + '\n\n'
     text += get_text(user_id, 'premium_active') if has_prem else get_text(user_id, 'premium_inactive')
     if remaining:
         text += '\n⏳ ' + get_text(user_id, 'premium_remaining', time=remaining)
     text += '\n\n' + get_text(user_id, 'premium_features') + '\n\n'
+    if DEMO_MODE:
+        text += '⚠️ ДЕМО-РЕЖИМ: оплата бесплатна!\n\n'
     text += get_text(user_id, 'choose_days')
-
+    
     buttons = []
     for days in sorted(PREMIUM_PRICES.keys()):
         price = PREMIUM_PRICES[days]
         buttons.append([Button.inline(get_text(user_id, 'buy_premium', days=days, price=price), f'buy_premium_{days}'.encode())])
-
+    
     buttons.append([Button.inline(get_text(user_id, 'main_menu'), b'main_menu')])
-
+    
     await event.edit(text, buttons=buttons)
 
-async def show_referral(event):
-    user_id = event.sender_id
+async def show_settings(event, user_id):
+    settings = user_settings.get(user_id, {'length': 5, 'digits': False, 'lang': 'ru'})
+    length = settings['length']
+    digits = settings['digits']
+    lang = settings.get('lang', 'ru')
+    
+    text = get_text(user_id, 'settings_title') + '\n\n'
+    text += get_text(user_id, 'settings_length', length=length) + '\n'
+    text += get_text(user_id, 'settings_digits', digits=get_text(user_id, 'digits_on_text') if digits else get_text(user_id, 'digits_off_text')) + '\n'
+    text += get_text(user_id, 'settings_lang', lang='🇷🇺 Русский' if lang == 'ru' else '🇬🇧 English')
+    
+    buttons = [
+        [Button.inline(get_text(user_id, 'length_5') if length == 6 else get_text(user_id, 'length_6'), b'toggle_length')],
+        [Button.inline(get_text(user_id, 'digits_off') if digits else get_text(user_id, 'digits_on'), b'toggle_digits')],
+        [Button.inline(get_text(user_id, 'lang_ru') if lang == 'en' else get_text(user_id, 'lang_en'), b'toggle_lang')],
+        [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
+    ]
+    await event.edit(text, buttons=buttons)
+
+async def show_referral(event, user_id):
     ref_data = referrals.get(user_id, {'invited': [], 'invited_by': None})
     invited_count = len(ref_data.get('invited', []))
-
     ref_code = generate_ref_code(user_id)
-
+    
     text = get_text(user_id, 'referral_title') + '\n\n'
     text += get_text(user_id, 'referral_link', bot=BOT_USERNAME, ref_code=ref_code) + '\n\n'
     text += get_text(user_id, 'referral_code', code=ref_code) + '\n\n'
     text += get_text(user_id, 'referral_stats', count=invited_count) + '\n\n'
     text += get_text(user_id, 'referral_reward')
-
+    
     buttons = [
         [Button.inline(get_text(user_id, 'friends'), b'referral_friends')],
         [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
     ]
     await event.edit(text, buttons=buttons)
 
-async def show_referral_friends(event):
-    user_id = event.sender_id
+async def show_referral_friends(event, user_id):
     ref_data = referrals.get(user_id, {'invited': [], 'invited_by': None})
     invited = ref_data.get('invited', [])
-
+    
     text = get_text(user_id, 'referral_friends') + '\n\n'
-
+    
     if not invited:
         text += get_text(user_id, 'no_referral_friends')
     else:
@@ -835,7 +834,7 @@ async def show_referral_friends(event):
                 text += f"{i}. @{name}\n"
             except:
                 text += f"{i}. {friend_id}\n"
-
+    
     buttons = [[Button.inline(get_text(user_id, 'back'), b'referral')]]
     await event.edit(text, buttons=buttons)
 
@@ -844,26 +843,26 @@ async def show_referral_friends(event):
 async def handle_promo(event):
     user_id = event.sender_id
     code = event.raw_text.replace('/promo', '').strip().upper()
-
+    
     if code not in promocodes:
         await event.reply(get_text(user_id, 'promo_invalid'))
         return
-
+    
     promo = promocodes[code]
     if promo['used'] >= promo['activations']:
         await event.reply(get_text(user_id, 'promo_used'))
         return
-
+    
     promo['used'] += 1
     reward = promo['reward']
-
+    
     days_map = {'premium_1': 1, 'premium_10': 10, 'premium_15': 15, 'premium_30': 30}
     days = days_map.get(reward, 1)
-
+    
     add_premium(user_id, days)
     expiry_date = datetime.now() + timedelta(days=days)
     save_data()
-
+    
     await event.reply(get_text(user_id, 'promo_success', days=days, expiry=expiry_date.strftime('%d.%m.%Y %H:%M')))
 
 # ========== АДМИН-КОМАНДА ==========
@@ -872,20 +871,20 @@ async def create_promo(event):
     if event.sender_id != ADMIN_ID:
         await event.reply('⛔ Доступ запрещён')
         return
-
+    
     parts = event.raw_text.split()
     try:
         activations = int(parts[1])
         reward = parts[2]
-
+        
         if reward not in ['premium_1', 'premium_10', 'premium_15', 'premium_30']:
             await event.reply('❌ Награда должна быть: premium_1, premium_10, premium_15, premium_30')
             return
-
+        
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         promocodes[code] = {'activations': activations, 'used': 0, 'reward': reward}
         save_data()
-
+        
         await event.reply(f"✅ Промокод создан!\n\n🎟 Код: `{code}`\n📊 Активаций: {activations}\n🎁 Награда: {reward}\n\nИспользуйте: /promo {code}")
     except:
         await event.reply('❌ Формат: /create_promo [кол-во_активаций] [награда]\nНаграды: premium_1, premium_10, premium_15, premium_30')

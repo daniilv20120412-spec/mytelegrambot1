@@ -6,10 +6,12 @@ import random
 import string
 import requests
 import json
+import aiohttp
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button, errors
 from telethon.errors import FloodWaitError
 
+# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -20,7 +22,7 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-# ========== КОНФИГ ==========
+# ==================== КОНФИГ ====================
 API_ID = 33387804
 API_HASH = '96a5dcb90f673eacb08d5c87bdd60540'
 BOT_TOKEN = '8841315782:AAFfEUUFNOKl1PdgjbZuDpqrJUkep6-a1A8'
@@ -33,7 +35,7 @@ DEMO_MODE = False
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
 
-# ========== ХРАНИЛИЩА ==========
+# ==================== ХРАНИЛИЩА ====================
 user_settings = {}
 user_favorites = {}
 user_premium = {}
@@ -77,7 +79,7 @@ if os.path.exists('bot.session'):
 
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# ========== ПЕРЕВОДЫ (ТОЛЬКО РУССКИЙ) ==========
+# ==================== ПЕРЕВОДЫ (ТОЛЬКО РУССКИЙ) ====================
 T = {
     'welcome': '🌸 Добро пожаловать, это бот для поиска крутых юзернеймов! 💎',
     'premium_status': '👑 Премиум: {status}',
@@ -156,7 +158,7 @@ T = {
 def txt(user_id, key, **kwargs):
     return T.get(key, key).format(**kwargs) if kwargs else T.get(key, key)
 
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 def has_premium(user_id):
     if user_id not in user_premium:
         return False
@@ -270,16 +272,24 @@ def generate_username(length, with_digits=False):
     rest = ''.join(random.choices(chars, k=length-1))
     return first + rest
 
+# ==================== НОВАЯ ФУНКЦИЯ ПРОВЕРКИ (через aiohttp) ====================
 async def is_username_free(username):
     try:
-        await bot.get_entity(f'@{username}')
-        return False
-    except ValueError:
-        return True
-    except FloodWaitError as e:
-        await asyncio.sleep(e.seconds)
+        url = f'https://t.me/{username}'
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                html = await response.text()
+                # Если на странице есть фраза "If you have Telegram, you can contact" — юз свободен
+                if "If you have Telegram, you can contact" in html:
+                    return True
+                else:
+                    return False
+    except asyncio.TimeoutError:
+        print(f"Таймаут при проверке @{username}")
         return None
-    except:
+    except Exception as e:
+        print(f"Ошибка проверки @{username}: {e}")
         return False
 
 def check_fragment(username):

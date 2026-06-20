@@ -8,7 +8,8 @@ import requests
 import json
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button, errors
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, UsernameNotOccupiedError, UsernameInvalidError
+from telethon.errors.rpcerrorlist import UserNotParticipantError
 
 # ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
 app = Flask(__name__)
@@ -72,6 +73,7 @@ def save_data():
 
 load_data()
 
+# Инициализация бота
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # ========== ЯЗЫКИ ==========
@@ -125,7 +127,7 @@ TRANSLATIONS = {
         'promo_title': '🎟 Промокоды\n\nВведите промокод в чат.\n\nПример: /promo ABC12345',
         'promo_success': '✅ Промокод активирован!\n\n🎁 Получен премиум на {days} дней!\n⏳ Действует до: {expiry}\n\n🔓 Теперь у вас безлимитный поиск!',
         'promo_invalid': '❌ Неверный промокод',
-        'promo_used': '❌ Промокод уже использован максимальное число раз.',
+        'promo_used': '❌ Количество активаций промокода исчерпано.',
         'promo_already_used_by_user': '❌ Вы уже активировали этот промокод ранее.',
         'referral_title': '👥 Реферальная система',
         'referral_link': '🔗 Твоя реферальная ссылка:\nhttps://t.me/{bot}?start={ref_code}',
@@ -149,7 +151,7 @@ TRANSLATIONS = {
         'fragment_detected': 'обнаружен ✅',
         'fragment_not_detected': 'не обнаружен ❌',
         'fragment_error': 'не удалось проверить ⚠️',
-        'subscribe_required': f'🔥 Чтобы пользоваться ботом, подпишись на наш канал:\n👉 https://t.me/{CHANNEL_USERNAME}\n\nПосле подписки нажми кнопку "Проверить ✅"',
+        'subscribe_required': f'🔥 Чтобы пользоваться ботом, подпишитесь на наш канал:\n👉 https://t.me/{CHANNEL_USERNAME}\n\nПосле подписки нажми кнопку "Проверить ✅"',
         'check_subscription': 'Проверить ✅',
         'subscription_success': '✅ Спасибо за подписку! Теперь вы можете пользоваться ботом.',
         'subscription_failed': '❌ Вы ещё не подписались на канал. Пожалуйста, подпишитесь и нажмите кнопку снова.',
@@ -275,10 +277,23 @@ def get_premium_remaining(user_id):
     days = remaining.days
     hours = remaining.seconds // 3600
     minutes = (remaining.seconds % 3600) // 60
-    return f"{days}d {hours}h {minutes}m"
+    return f"{days}д {hours}ч {minutes}м"
 
 def add_premium(user_id, days):
-    expiry_date = datetime.now() + timedelta(days=days)
+    # ИСПРАВЛЕНО: Суммируем время, если премиум уже активен
+    if user_id in user_premium and user_premium[user_id].get('active'):
+        current_expiry_str = user_premium[user_id].get('expires')
+        if current_expiry_str:
+            current_expiry = datetime.strptime(current_expiry_str, '%Y-%m-%d %H:%M:%S')
+            if current_expiry > datetime.now():
+                expiry_date = current_expiry + timedelta(days=days)
+            else:
+                expiry_date = datetime.now() + timedelta(days=days)
+        else:
+            expiry_date = datetime.now() + timedelta(days=days)
+    else:
+        expiry_date = datetime.now() + timedelta(days=days)
+        
     user_premium[user_id] = {
         'expires': expiry_date.strftime('%Y-%m-%d %H:%M:%S'),
         'active': True
@@ -287,10 +302,11 @@ def add_premium(user_id, days):
 
 def check_limit(user_id, length):
     if has_premium(user_id):
-        return True, None, None
+        return True, '♾ Безлимит', None
     
     if user_id not in user_searches:
-        user_searches[user_id] = {'5': {'count': 0, 'reset_time': None}, '6': {'count': 0, 'reset_time': None}}
+        user_searches[user_id] = {'5': {'count': 0, 'reset_time': None},
+                                  '6': {'count': 0, 'reset_time': None}}
         save_data()
     
     str_length = str(length)
@@ -299,109 +315,70 @@ def check_limit(user_id, length):
         save_data()
     
     data = user_searches[user_id][str_length]
-    reset_time = data.get('reset_time')
+    reset_time_str = data.get('reset_time')
     
-    if reset_time:
-        reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
+    if reset_time_str:
+        reset_dt = datetime.strptime(reset_time_str, '%Y-%m-%d %H:%M:%S')
         if datetime.now() >= reset_dt:
             data['count'] = 0
             data['reset_time'] = None
             save_data()
-            return True, LIMITS.get(length, 10), None
+            return True, LIMITS[length], None
+        else:
+            remaining = reset_dt - datetime.now()
+            return False, 0, remaining
     
     used = data.get('count', 0)
-    limit = LIMITS.get(length, 10)
-    
-    if used >= limit:
-        if reset_time:
-            reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
-            remaining = reset_dt - datetime.now()
-            if remaining.total_seconds() < 0:
-                data['count'] = 0
-                data['reset_time'] = None
-                save_data()
-                return True, limit, None
-            return False, limit, remaining
-        else:
-            reset_dt = datetime.now() + timedelta(hours=24)
-            data['reset_time'] = reset_dt.strftime('%Y-%m-%d %H:%M:%S')
-            save_data()
-            remaining = reset_dt - datetime.now()
-            return False, limit, remaining
-    
-    return True, limit, None
+    limit = LIMITS[length]
+    if used < limit:
+        return True, limit - used, None
+    else:
+        reset_dt = datetime.now() + timedelta(hours=24)
+        data['reset_time'] = reset_dt.strftime('%Y-%m-%d %H:%M:%S')
+        save_data()
+        remaining = reset_dt - datetime.now()
+        return False, 0, remaining
 
 def increment_search(user_id, length):
-    str_length = str(length)
-    
+    # ИСПРАВЛЕНО: Не считаем лимиты для премиум-пользователей
+    if has_premium(user_id):
+        return
+        
     if user_id not in user_searches:
-        user_searches[user_id] = {'5': {'count': 0, 'reset_time': None}, '6': {'count': 0, 'reset_time': None}}
-    
+        user_searches[user_id] = {'5': {'count': 0, 'reset_time': None},
+                                  '6': {'count': 0, 'reset_time': None}}
+    str_length = str(length)
     if str_length not in user_searches[user_id]:
         user_searches[user_id][str_length] = {'count': 0, 'reset_time': None}
     
     data = user_searches[user_id][str_length]
-    
-    if data.get('reset_time'):
-        reset_dt = datetime.strptime(data['reset_time'], '%Y-%m-%d %H:%M:%S')
+    reset_time_str = data.get('reset_time')
+    if reset_time_str:
+        reset_dt = datetime.strptime(reset_time_str, '%Y-%m-%d %H:%M:%S')
         if datetime.now() >= reset_dt:
             data['count'] = 0
             data['reset_time'] = None
     
     data['count'] += 1
-    
-    limit = LIMITS.get(length, 10)
-    if data['count'] >= limit and not data.get('reset_time'):
+    if data['count'] >= LIMITS[length] and not data.get('reset_time'):
         reset_dt = datetime.now() + timedelta(hours=24)
         data['reset_time'] = reset_dt.strftime('%Y-%m-%d %H:%M:%S')
-    
     save_data()
 
 def get_remaining_searches(user_id, length):
-    if has_premium(user_id):
-        return '♾ Unlimited', None
-    
-    str_length = str(length)
-    
-    if user_id not in user_searches:
-        return LIMITS.get(length, 10), None
-    
-    if str_length not in user_searches[user_id]:
-        return LIMITS.get(length, 10), None
-    
-    data = user_searches[user_id][str_length]
-    reset_time = data.get('reset_time')
-    
-    if reset_time:
-        reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
-        if datetime.now() >= reset_dt:
-            return LIMITS.get(length, 10), None
-    
-    used = data.get('count', 0)
-    limit = LIMITS.get(length, 10)
-    remaining = limit - used
-    
-    if remaining <= 0 and reset_time:
-        reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
-        remaining_time = reset_dt - datetime.now()
-        if get_lang(user_id) == 'ru':
-            return '⏳ 0 (через ' + format_time_ru(remaining_time) + ')', remaining_time
+    can, remaining, extra = check_limit(user_id, length)
+    if can:
+        return str(remaining), None
+    else:
+        if extra:
+            hours = extra.seconds // 3600
+            minutes = (extra.seconds % 3600) // 60
+            return '⏳ 0 (через {}ч {}м)'.format(hours, minutes), extra
         else:
-            return '⏳ 0 (in ' + format_time(remaining_time) + ')', remaining_time
-    
-    return remaining if remaining > 0 else 0, None
+            return '⏳ 0', None
 
 def format_time(td):
-    if td is None:
-        return ''
-    total_seconds = int(td.total_seconds())
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    return f"{hours}h {minutes}m"
-
-def format_time_ru(td):
-    if td is None:
-        return ''
+    if td is None: return ''
     total_seconds = int(td.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -415,24 +392,32 @@ def generate_username(length, with_digits=False):
     rest = ''.join(random.choices(chars, k=length-1))
     return first + rest
 
+# ИСПРАВЛЕНО: Правильная обработка исключений Telethon
 async def is_username_free(username):
     try:
         await bot.get_entity(f'@{username}')
         return False
-    except ValueError:
+    except (UsernameNotOccupiedError, ValueError):
         return True
+    except UsernameInvalidError:
+        return False
     except FloodWaitError as e:
         await asyncio.sleep(e.seconds)
         return None
     except Exception:
         return False
 
-def check_fragment(username):
+# ИСПРАВЛЕНО: Асинхронный запрос, чтобы не блокировать event loop
+async def check_fragment(username):
     try:
         url = f'https://fragment.com/username/{username}'
-        response = requests.get(url, timeout=5)
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, 
+            lambda: requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        )
         return 'fragment_detected' if response.status_code == 200 else 'fragment_not_detected'
-    except:
+    except Exception:
         return 'fragment_error'
 
 async def is_subscribed(user_id):
@@ -440,13 +425,14 @@ async def is_subscribed(user_id):
         channel = await bot.get_entity(f'@{CHANNEL_USERNAME}')
         await bot.get_permissions(channel, user_id)
         return True
-    except errors.rpcerrorlist.UserNotParticipantError:
+    except UserNotParticipantError:
         return False
     except Exception:
         return True
 
-# ========== /START ==========
-@bot.on(events.NewMessage(pattern='/start(?: (.*))?'))
+# ========== ОБРАБОТЧИКИ ==========
+# ИСПРАВЛЕНО: Паттерн учитывает /start@BotName
+@bot.on(events.NewMessage(pattern=r'/start(?:@\w+)?(?:\s+(.*))?'))
 async def start(event):
     user_id = event.sender_id
     args = event.pattern_match.group(1)
@@ -492,17 +478,15 @@ async def start(event):
         buttons = [[Button.inline(get_text(user_id, 'check_subscription'), b'check_sub')]]
         await event.respond(text, buttons=buttons)
 
-# ========== КНОПКА ПРОВЕРКИ ПОДПИСКИ ==========
 @bot.on(events.CallbackQuery(data=b'check_sub'))
 async def check_subscription_callback(event):
     user_id = event.sender_id
     if await is_subscribed(user_id):
-        await event.edit(get_text(user_id, 'subscription_success'))
-        await send_main_menu(event, user_id, edit=False)
+        # ИСПРАВЛЕНО: Редактируем сообщение, а не отправляем новое
+        await send_main_menu(event, user_id, edit=True)
     else:
         await event.answer(get_text(user_id, 'subscription_failed'), alert=True)
 
-# ========== ГЛАВНОЕ МЕНЮ ==========
 async def send_main_menu(event, user_id, edit=True):
     premium_status = '✅ Активен' if has_premium(user_id) else '❌ Не активен'
     if get_lang(user_id) == 'en':
@@ -532,7 +516,6 @@ async def send_main_menu(event, user_id, edit=True):
     else:
         await event.respond(text, buttons=buttons)
 
-# ========== ОБРАБОТЧИК ВСЕХ КНОПОК ==========
 @bot.on(events.CallbackQuery)
 async def callback(event):
     user_id = event.sender_id
@@ -547,22 +530,16 @@ async def callback(event):
         length = settings['length']
         digits = settings['digits']
         
-        can_search, limit, remaining_time = check_limit(user_id, length)
-        if not can_search:
-            reset_dt, remaining = None, None
-            if user_id in user_searches and str(length) in user_searches[user_id]:
-                reset_time = user_searches[user_id][str(length)].get('reset_time')
-                if reset_time:
-                    reset_dt = datetime.strptime(reset_time, '%Y-%m-%d %H:%M:%S')
-                    remaining = reset_dt - datetime.now()
+        can, remaining, remaining_time = check_limit(user_id, length)
+        if not can:
+            reset_time_str = user_searches.get(user_id, {}).get(str(length), {}).get('reset_time')
+            reset_dt = datetime.strptime(reset_time_str, '%Y-%m-%d %H:%M:%S') if reset_time_str else None
             if reset_dt:
-                if get_lang(user_id) == 'ru':
-                    time_str = format_time_ru(remaining)
-                else:
-                    time_str = format_time(remaining)
-                text = get_text(user_id, 'limit_reached', limit=limit, length=length, time=time_str, reset_time=reset_dt.strftime('%d.%m.%Y %H:%M'))
+                time_left = format_time(reset_dt - datetime.now())
+                reset_time_formatted = reset_dt.strftime('%d.%m.%Y %H:%M')
+                text = get_text(user_id, 'limit_reached', limit=LIMITS[length], length=length, time=time_left, reset_time=reset_time_formatted)
             else:
-                text = get_text(user_id, 'limit_reached', limit=limit, length=length, time='24h', reset_time='')
+                text = get_text(user_id, 'limit_reached', limit=LIMITS[length], length=length, time='24ч', reset_time='')
             buttons = [
                 [Button.inline(get_text(user_id, 'premium_shop'), b'premium_shop')],
                 [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]
@@ -583,12 +560,12 @@ async def callback(event):
         increment_search(user_id, length)
         
         if found:
-            fragment_status = check_fragment(found)
+            fragment_status = await check_fragment(found) # ИСПРАВЛЕНО: await
             fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
             fragment_display = get_text(user_id, fragment_key)
             fav_list = user_favorites.get(user_id, [])
             is_faved = found in fav_list
-            remaining, _ = get_remaining_searches(user_id, len(found))
+            remaining, _ = get_remaining_searches(user_id, length)
             
             text = get_text(user_id, 'found', username=found, fragment=fragment_display,
                            faved=get_text(user_id, 'faved_yes') if is_faved else get_text(user_id, 'faved_no'),
@@ -629,7 +606,7 @@ async def callback(event):
                 status = '🟢 Свободен' if free else '🔴 Занят'
             else:
                 status = '🟢 Free' if free else '🔴 Taken'
-            fragment_status = check_fragment(username)
+            fragment_status = await check_fragment(username) # ИСПРАВЛЕНО: await
             fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
             fragment_display = get_text(user_id, fragment_key)
             text += f"{i}. @{username} — {status} | Fragment: {fragment_display}\n"
@@ -748,8 +725,8 @@ async def callback(event):
             user_favorites[user_id] = fav_list
             save_data()
             await event.answer(f'⭐ {username} добавлен!' if get_lang(user_id) == 'ru' else f'⭐ {username} added!', alert=True)
-        # Показать результат поиска с этим юзом
-        fragment_status = check_fragment(username)
+        
+        fragment_status = await check_fragment(username) # ИСПРАВЛЕНО: await
         fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
         fragment_display = get_text(user_id, fragment_key)
         is_faved = username in fav_list
@@ -780,8 +757,8 @@ async def callback(event):
             user_favorites[user_id] = fav_list
             save_data()
             await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
-        # Показать результат поиска после удаления
-        fragment_status = check_fragment(username)
+        
+        fragment_status = await check_fragment(username) # ИСПРАВЛЕНО: await
         fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
         fragment_display = get_text(user_id, fragment_key)
         is_faved = username in fav_list
@@ -812,7 +789,7 @@ async def callback(event):
             user_favorites[user_id] = fav_list
             save_data()
             await event.answer(f'🗑 {username} удалён!' if get_lang(user_id) == 'ru' else f'🗑 {username} removed!', alert=True)
-        # Обновить список избранного
+        
         fav_list = user_favorites.get(user_id, [])
         if not fav_list:
             text = get_text(user_id, 'no_favorites')
@@ -829,7 +806,7 @@ async def callback(event):
                 status = '🟢 Свободен' if free else '🔴 Занят'
             else:
                 status = '🟢 Free' if free else '🔴 Taken'
-            fragment_status = check_fragment(uname)
+            fragment_status = await check_fragment(uname) # ИСПРАВЛЕНО: await
             fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
             fragment_display = get_text(user_id, fragment_key)
             text += f"{i}. @{uname} — {status} | Fragment: {fragment_display}\n"
@@ -885,11 +862,11 @@ async def callback(event):
         await event.answer(get_text(user_id, 'favorites_full'), alert=True)
         return
 
-# ========== /PROMO ==========
-@bot.on(events.NewMessage(pattern='/promo .+'))
+# ИСПРАВЛЕНО: Паттерн учитывает /promo@BotName
+@bot.on(events.NewMessage(pattern=r'/promo(?:@\w+)?\s+(.+)'))
 async def handle_promo(event):
     user_id = event.sender_id
-    code = event.raw_text.replace('/promo', '').strip().upper()
+    code = event.pattern_match.group(1).strip().upper()
     
     if code not in promocodes:
         await event.reply(get_text(user_id, 'promo_invalid'))
@@ -918,17 +895,16 @@ async def handle_promo(event):
     expiry_date = datetime.now() + timedelta(days=days)
     await event.reply(get_text(user_id, 'promo_success', days=days, expiry=expiry_date.strftime('%d.%m.%Y %H:%M')))
 
-# ========== /CREATE_PROMO ==========
-@bot.on(events.NewMessage(pattern='/create_promo .+ .+'))
+# ИСПРАВЛЕНО: Паттерн учитывает /create_promo@BotName
+@bot.on(events.NewMessage(pattern=r'/create_promo(?:@\w+)?\s+(\d+)\s+(\w+)'))
 async def create_promo(event):
     if event.sender_id != ADMIN_ID:
         await event.reply('⛔ Доступ запрещён')
         return
     
-    parts = event.raw_text.split()
     try:
-        activations = int(parts[1])
-        reward = parts[2]
+        activations = int(event.pattern_match.group(1))
+        reward = event.pattern_match.group(2)
         
         if reward not in ['premium_1', 'premium_10', 'premium_15', 'premium_30']:
             await event.reply('❌ Награда должна быть: premium_1, premium_10, premium_15, premium_30')
@@ -939,13 +915,13 @@ async def create_promo(event):
         save_data()
         
         await event.reply(f"✅ Промокод создан!\n\n🎟 Код: `{code}`\n📊 Активаций: {activations}\n🎁 Награда: {reward}\n\nИспользуйте: /promo {code}")
-    except:
+    except Exception:
         await event.reply('❌ Формат: /create_promo [кол-во_активаций] [награда]\nНаграды: premium_1, premium_10, premium_15, premium_30')
 
 # ========== ЗАПУСК ==========
 print('🤖 Бот запущен!')
 print(f'Канал для подписки: @{CHANNEL_USERNAME}')
-print('Лимиты: 5 букв — 10/день, 6 букв — 50/день')
+print('Лимиты: 5 букв — 10/день, 6 букв — 50/день (сброс через 24 часа)')
 print('Для создания промокода: /create_promo 5 premium_30')
 print(f'Демо-режим: {"ВКЛЮЧЕН" if DEMO_MODE else "ВЫКЛЮЧЕН"}')
 

@@ -29,10 +29,10 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
-# ==================== ПРОКСИ ====================
-PROXY_SERVER = 'link.mishkalapy.life'
-PROXY_PORT = 443
-PROXY_SECRET = 'eeb6b2b376ea60c64410542c640dc2765e6c696e6b2e6d6973686b616c6170792e6c696665'
+# ==================== НОВЫЙ ПРОКСИ ====================
+PROXY_SERVER = 'persian.gulf.ir.olsjddhf.info.'
+PROXY_PORT = 88
+PROXY_SECRET = 'ee0000f00f0f775555fffffff5006e2e696d656469612e737465616d706f77657265642e636f6d'
 
 # ==================== НАСТРОЙКИ ====================
 DEMO_MODE = False  # ПРЕМИУМ ПЛАТНЫЙ!

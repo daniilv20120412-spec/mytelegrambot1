@@ -9,8 +9,8 @@ import json
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button
 from telethon.errors import FloodWaitError
+from telethon.network.connection.tcpmtproxy import ConnectionTcpMTProxyAbridged
 
-# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -29,10 +29,25 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
-# ==================== ОСНОВНЫЕ НАСТРОЙКИ ====================
+# ==================== ПРОКСИ ====================
+PROXY_SERVER = 'link.mishkalapy.life'
+PROXY_PORT = 443
+PROXY_SECRET = 'eeb6b2b376ea60c64410542c640dc2765e6c696e6b2e6d6973686b616c6170792e6c696665'
+
+# ==================== НАСТРОЙКИ ====================
+DEMO_MODE = False  # ПРЕМИУМ ПЛАТНЫЙ!
+
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
-DEMO_MODE = True
+
+# ==================== ПОДКЛЮЧЕНИЕ ЧЕРЕЗ ПРОКСИ ====================
+bot = TelegramClient(
+    'bot', 
+    API_ID, 
+    API_HASH,
+    connection=ConnectionTcpMTProxyAbridged,
+    proxy=(PROXY_SERVER, PROXY_PORT, PROXY_SECRET)
+).start(bot_token=BOT_TOKEN)
 
 # ==================== ХРАНИЛИЩА ====================
 user_settings = {}
@@ -72,16 +87,14 @@ def save_data():
 
 load_data()
 
-# Удаляем старую сессию
 if os.path.exists('bot.session'):
     os.remove('bot.session')
-
-bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # ==================== ТЕКСТЫ ====================
 T = {
     'welcome': '🌸 Добро пожаловать, это бот для поиска крутых юзернеймов! 💎',
     'premium_status': '👑 Премиум: {status}',
+    'premium_remaining': '⏳ Осталось: {time}',
     'limits': '📊 Лимиты поиска:\n🔹 5 букв: {searches_5}\n🔹 6 букв: {searches_6}',
     'choose_function': 'Выбери функцию:',
     'search': '🔍 Поиск',
@@ -90,19 +103,20 @@ T = {
     'promocode': '🎟 Промокод',
     'settings': '⚙️ Настройки',
     'referral': '👥 Рефералы',
-    'searching': '🔍 Ищу свободный юзернейм...',
-    'found': '✅ Найден свободный юзернейм!\n\n@{username}',
+    'searching': '🔍 Ищу свободный юзернейм... Подождите секунду...',
+    'found': '✅ Найден свободный юзернейм!\n\n@{username}\n\n📊 На фрагменте — {fragment}\n\n⭐ В избранном: {faved} ({count}/5)',
     'remaining': '📊 Осталось поисков: {remaining}',
-    'no_free': '😔 Не удалось найти свободный юзернейм.',
-    'limit_reached': '⛔ Лимит поиска исчерпан!\n\nВосстановление завтра в 00:00.',
-    'add_fav': '⭐ Добавить',
-    'remove_fav': '🗑 Убрать',
-    'find_more': '🔄 Ещё',
-    'favorites_title': '⭐ Твои сохранённые юзернеймы:',
-    'no_favorites': '⭐ В избранном пока пусто',
+    'no_free': '😔 Не удалось найти свободный юзернейм. Попробуйте изменить настройки.',
+    'limit_reached': '⛔ Лимит поиска исчерпан!\n\nВы использовали все {limit} попыток для {length}-буквенных юзов.\n\n⏳ Восстановление завтра в 00:00.\n\n💎 Купите премиум для безлимитного поиска!',
+    'add_fav': '⭐ Добавить в избранное',
+    'remove_fav': '🗑 Убрать из избранного',
+    'find_more': '🔄 Найти ещё',
+    'favorites_title': '⭐ Твои сохранённые юзернеймы (макс 5):',
+    'no_favorites': '⭐ В избранном пока пусто\n\nНайди крутой юз и сохрани его!',
     'settings_title': '⚙️ Настройки',
     'settings_length': '📏 Количество букв: {length}',
     'settings_digits': '🔢 Цифры: {digits}',
+    'choose_length': '📏 Выберите количество букв:',
     'length_5': '5 букв',
     'length_6': '6 букв',
     'digits_on': 'Включить цифры',
@@ -112,27 +126,42 @@ T = {
     'premium_title': '💎 Премиум магазин',
     'premium_active': '✅ Премиум активен',
     'premium_inactive': '❌ Премиум не активен',
+    'premium_features': '🔥 Что даёт премиум:\n• ♾ Безлимитный поиск (5 и 6 букв)\n• 🚀 Приоритетная генерация\n• 🎁 Бонусные промокоды',
     'choose_days': 'Выберите срок:',
     'buy_premium': '📅 {days} дней — {price} ⭐',
-    'confirm_payment': '💎 Оплата премиума\n\n📅 Срок: {days} дней\n💰 Цена: {price} ⭐',
+    'confirm_payment': '💎 Оплата премиума\n\n📅 Срок: {days} дней\n💰 Цена: {price} ⭐\n\nНажмите кнопку ниже для оплаты:',
     'pay_stars': '⭐ Оплатить звёздами',
-    'payment_success': '✅ Премиум активирован на {days} дней!',
-    'promo_title': '🎟 Введите промокод: /promo КОД',
-    'promo_success': '✅ Промокод активирован!',
+    'payment_success': '✅ Премиум активирован на {days} дней!\n\n⏳ Действует до: {expiry}\n\n🔓 Открыт безлимитный поиск!',
+    'promo_title': '🎟 Промокоды\n\nВведите промокод в чат.\n\nПример: /promo ABC12345',
+    'promo_success': '✅ Промокод активирован!\n\n🎁 Получен премиум на {days} дней!\n⏳ Действует до: {expiry}\n\n🔓 Теперь у вас безлимитный поиск!',
     'promo_invalid': '❌ Неверный промокод',
-    'promo_used': '❌ Промокод использован',
+    'promo_used': '❌ Количество активаций промокода исчерпано.',
+    'promo_already_used': '❌ Вы уже активировали этот промокод ранее.',
     'referral_title': '👥 Реферальная система',
-    'referral_link': '🔗 Твоя ссылка: https://t.me/{bot}?start={ref_code}',
-    'referral_stats': '📊 Приглашено: {count}',
+    'referral_link': '🔗 Твоя реферальная ссылка:\nhttps://t.me/{bot}?start={ref_code}',
+    'referral_stats': '📊 Приглашено: {count} человек',
+    'referral_reward': '🎁 За 10 приглашённых — премиум на 1 день!\n🎁 За покупку премиума рефералом — +5 дней тебе!',
+    'referral_joined': '👤 Пользователь @{username} присоединился по вашей ссылке!',
+    'referral_reward_10': '🎉 Вы пригласили 10 человек! Получите премиум на 1 день!',
+    'referral_reward_purchase': '🎉 Ваш реферал @{username} купил премиум! Вы получили +5 дней!',
     'faved_yes': '✅ Да',
     'faved_no': '❌ Нет',
     'digits_on_text': 'Включены ✅',
     'digits_off_text': 'Выключены ❌',
-    'favorites_full': '⚠️ Максимум 5 юзов в избранном!',
-    'subscribe_required': f'🔥 Чтобы пользоваться ботом, подпишись на канал:\n👉 https://t.me/{CHANNEL_USERNAME}',
+    'favorites_full': '⚠️ Максимум 5 юзов в избранном! Удалите лишние.',
+    'no_referrals': '👥 У вас пока нет рефералов.\n\nПриглашайте друзей и получайте бонусы!',
+    'referral_code': '🔑 Ваш реферальный код: {code}',
+    'premium_already': '✅ У вас уже есть премиум!',
+    'friends': '👥 Друзья',
+    'referral_friends': '👥 Список приглашённых:',
+    'no_referral_friends': 'Пока никого не пригласили',
+    'fragment_detected': 'обнаружен ✅',
+    'fragment_not_detected': 'не обнаружен ❌',
+    'fragment_error': 'не удалось проверить ⚠️',
+    'subscribe_required': f'🔥 Чтобы пользоваться ботом, подпишись на наш канал:\n👉 https://t.me/{CHANNEL_USERNAME}\n\nПосле подписки нажми кнопку "Проверить ✅"',
     'check_subscription': 'Проверить ✅',
-    'subscription_success': '✅ Спасибо за подписку!',
-    'subscription_failed': '❌ Вы ещё не подписались',
+    'subscription_success': '✅ Спасибо за подписку! Теперь вы можете пользоваться ботом.',
+    'subscription_failed': '❌ Вы ещё не подписались на канал. Пожалуйста, подпишитесь и нажмите кнопку снова.',
 }
 
 def txt(user_id, key, **kwargs):
@@ -147,8 +176,25 @@ def has_premium(user_id):
         return False
     expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
     if datetime.now() > expiry_date:
+        user_premium[user_id]['active'] = False
+        save_data()
         return False
     return True
+
+def get_premium_remaining(user_id):
+    if user_id not in user_premium:
+        return None
+    expiry = user_premium[user_id].get('expires')
+    if not expiry:
+        return None
+    expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+    remaining = expiry_date - datetime.now()
+    if remaining.total_seconds() < 0:
+        return None
+    days = remaining.days
+    hours = remaining.seconds // 3600
+    minutes = (remaining.seconds % 3600) // 60
+    return f"{days}д {hours}ч {minutes}м"
 
 def add_premium(user_id, days):
     expiry_date = datetime.now() + timedelta(days=days)
@@ -195,6 +241,13 @@ def increment_search(user_id, length):
     data['count'] += 1
     save_data()
 
+def get_remaining_searches(user_id, length):
+    can, remaining = check_limit(user_id, length)
+    if can:
+        return str(remaining)
+    else:
+        return '⏳ 0 (завтра в 00:00)'
+
 def generate_username(length, with_digits=False):
     chars = string.ascii_lowercase
     if with_digits:
@@ -205,9 +258,12 @@ def generate_username(length, with_digits=False):
 
 def is_username_free_sync(username):
     try:
+        proxies = {
+            'http': f'socks5://{PROXY_SERVER}:{PROXY_PORT}',
+            'https': f'socks5://{PROXY_SERVER}:{PROXY_PORT}'
+        }
         url = f'https://t.me/{username}'
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, timeout=5, headers=headers)
+        response = requests.get(url, timeout=10, proxies=proxies)
         if response.status_code == 200:
             if "If you have Telegram, you can contact" in response.text:
                 return True
@@ -225,14 +281,18 @@ async def is_username_free(username):
 
 def check_fragment(username):
     try:
+        proxies = {
+            'http': f'socks5://{PROXY_SERVER}:{PROXY_PORT}',
+            'https': f'socks5://{PROXY_SERVER}:{PROXY_PORT}'
+        }
         url = f'https://fragment.com/username/{username}'
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=5, proxies=proxies)
         if response.status_code == 200:
-            return True
+            return 'fragment_detected'
         else:
-            return False
+            return 'fragment_not_detected'
     except:
-        return False
+        return 'fragment_error'
 
 async def is_subscribed(user_id):
     try:
@@ -301,10 +361,12 @@ async def check_sub(event):
 
 async def send_main_menu(event, user_id, edit=True):
     premium_status = '✅ Активен' if has_premium(user_id) else '❌ Не активен'
-    searches_5, _ = check_limit(user_id, 5)
-    searches_6, _ = check_limit(user_id, 6)
+    remaining_rem = get_premium_remaining(user_id) if has_premium(user_id) else None
+    searches_5 = get_remaining_searches(user_id, 5)
+    searches_6 = get_remaining_searches(user_id, 6)
     text = (txt(user_id, 'welcome') + '\n\n' +
             txt(user_id, 'premium_status', status=premium_status) +
+            (('\n' + txt(user_id, 'premium_remaining', time=remaining_rem)) if remaining_rem else '') +
             '\n\n' + txt(user_id, 'limits', searches_5=str(searches_5), searches_6=str(searches_6)) +
             '\n\n' + txt(user_id, 'choose_function'))
     buttons = [
@@ -329,7 +391,7 @@ async def search_callback(event):
 
     can, remaining = check_limit(user_id, length)
     if not can:
-        text = txt(user_id, 'limit_reached')
+        text = txt(user_id, 'limit_reached', limit=LIMITS[length], length=length)
         buttons = [
             [Button.inline(txt(user_id, 'premium_shop'), b'premium_shop')],
             [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]
@@ -351,14 +413,18 @@ async def search_callback(event):
     increment_search(user_id, length)
 
     if found:
-        fragment = 'обнаружен ✅' if check_fragment(found) else 'не обнаружен ❌'
+        fragment_status = check_fragment(found)
+        fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+        fragment_display = txt(user_id, fragment_key)
         fav_list = user_favorites.get(user_id, [])
         is_faved = found in fav_list
-        remaining, _ = check_limit(user_id, length)
+        remaining = get_remaining_searches(user_id, length)
 
-        text = txt(user_id, 'found', username=found)
-        text += '\n\n📊 На фрагменте — ' + fragment
-        text += '\n\n⭐ В избранном: ' + ('✅ Да' if is_faved else '❌ Нет') + f' ({len(fav_list)}/5)'
+        text = txt(user_id, 'found',
+                   username=found,
+                   fragment=fragment_display,
+                   faved=txt(user_id, 'faved_yes') if is_faved else txt(user_id, 'faved_no'),
+                   count=len(fav_list))
         text += '\n\n' + txt(user_id, 'remaining', remaining=str(remaining))
 
         buttons = []
@@ -397,8 +463,10 @@ async def callback(event):
         for i, username in enumerate(fav_list, 1):
             free = await is_username_free(username)
             status = '🟢 Свободен' if free else '🔴 Занят'
-            fragment = 'обнаружен ✅' if check_fragment(username) else 'не обнаружен ❌'
-            text += f"{i}. @{username} — {status} | Fragment: {fragment}\n"
+            fragment_status = check_fragment(username)
+            fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+            fragment_display = txt(user_id, fragment_key)
+            text += f"{i}. @{username} — {status} | Fragment: {fragment_display}\n"
         buttons = []
         for username in fav_list:
             buttons.append([Button.inline(f'🗑 Delete @{username}', f'remove_fav_from_list_{username}'.encode())])
@@ -409,9 +477,13 @@ async def callback(event):
 
     if data == 'premium_shop':
         has_prem = has_premium(user_id)
+        remaining = get_premium_remaining(user_id) if has_prem else None
         text = txt(user_id, 'premium_title') + '\n\n'
         text += txt(user_id, 'premium_active') if has_prem else txt(user_id, 'premium_inactive')
-        text += '\n\n' + txt(user_id, 'choose_days')
+        if remaining:
+            text += '\n⏳ ' + txt(user_id, 'premium_remaining', time=remaining)
+        text += '\n\n' + txt(user_id, 'premium_features') + '\n\n'
+        text += txt(user_id, 'choose_days')
         buttons = []
         for days in sorted(PREMIUM_PRICES.keys()):
             price = PREMIUM_PRICES[days]
@@ -432,7 +504,9 @@ async def callback(event):
         ref_code = generate_ref_code(user_id)
         text = (txt(user_id, 'referral_title') + '\n\n' +
                 txt(user_id, 'referral_link', bot=BOT_USERNAME, ref_code=ref_code) + '\n\n' +
-                txt(user_id, 'referral_stats', count=invited_count))
+                txt(user_id, 'referral_code', code=ref_code) + '\n\n' +
+                txt(user_id, 'referral_stats', count=invited_count) + '\n\n' +
+                txt(user_id, 'referral_reward'))
         buttons = [
             [Button.inline(txt(user_id, 'friends'), b'referral_friends')],
             [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]
@@ -498,13 +572,15 @@ async def callback(event):
             user_favorites[user_id] = fav_list
             save_data()
             await event.answer(f'⭐ {username} добавлен!', alert=True)
-        # Обновляем результат поиска
-        fragment = 'обнаружен ✅' if check_fragment(username) else 'не обнаружен ❌'
+        # обновляем результат поиска
+        fragment_status = check_fragment(username)
+        fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+        fragment_display = txt(user_id, fragment_key)
         is_faved = username in fav_list
-        remaining, _ = check_limit(user_id, len(username))
-        text = txt(user_id, 'found', username=username)
-        text += '\n\n📊 На фрагменте — ' + fragment
-        text += '\n\n⭐ В избранном: ' + ('✅ Да' if is_faved else '❌ Нет') + f' ({len(fav_list)}/5)'
+        remaining = get_remaining_searches(user_id, len(username))
+        text = txt(user_id, 'found', username=username, fragment=fragment_display,
+                   faved=txt(user_id, 'faved_yes') if is_faved else txt(user_id, 'faved_no'),
+                   count=len(fav_list))
         text += '\n\n' + txt(user_id, 'remaining', remaining=str(remaining))
         buttons = []
         if is_faved:
@@ -528,13 +604,15 @@ async def callback(event):
             user_favorites[user_id] = fav_list
             save_data()
             await event.answer(f'🗑 {username} удалён!', alert=True)
-        # Обновляем результат поиска
-        fragment = 'обнаружен ✅' if check_fragment(username) else 'не обнаружен ❌'
+        # обновляем результат поиска
+        fragment_status = check_fragment(username)
+        fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+        fragment_display = txt(user_id, fragment_key)
         is_faved = username in fav_list
-        remaining, _ = check_limit(user_id, len(username))
-        text = txt(user_id, 'found', username=username)
-        text += '\n\n📊 На фрагменте — ' + fragment
-        text += '\n\n⭐ В избранном: ' + ('✅ Да' if is_faved else '❌ Нет') + f' ({len(fav_list)}/5)'
+        remaining = get_remaining_searches(user_id, len(username))
+        text = txt(user_id, 'found', username=username, fragment=fragment_display,
+                   faved=txt(user_id, 'faved_yes') if is_faved else txt(user_id, 'faved_no'),
+                   count=len(fav_list))
         text += '\n\n' + txt(user_id, 'remaining', remaining=str(remaining))
         buttons = []
         if is_faved:
@@ -568,8 +646,10 @@ async def callback(event):
         for i, uname in enumerate(fav_list, 1):
             free = await is_username_free(uname)
             status = '🟢 Свободен' if free else '🔴 Занят'
-            fragment = 'обнаружен ✅' if check_fragment(uname) else 'не обнаружен ❌'
-            text += f"{i}. @{uname} — {status} | Fragment: {fragment}\n"
+            fragment_status = check_fragment(uname)
+            fragment_key = 'fragment_detected' if 'fragment_detected' in fragment_status else 'fragment_not_detected' if 'fragment_not_detected' in fragment_status else 'fragment_error'
+            fragment_display = txt(user_id, fragment_key)
+            text += f"{i}. @{uname} — {status} | Fragment: {fragment_display}\n"
         buttons = []
         for uname in fav_list:
             buttons.append([Button.inline(f'🗑 Delete @{uname}', f'remove_fav_from_list_{uname}'.encode())])
@@ -578,6 +658,7 @@ async def callback(event):
         await event.edit(text, buttons=buttons)
         return
 
+    # ==================== ПЛАТНЫЙ ПРЕМИУМ ====================
     if data.startswith('buy_premium_'):
         days = int(data.replace('buy_premium_', ''))
         price = PREMIUM_PRICES.get(days)
@@ -601,12 +682,21 @@ async def callback(event):
             return
         if DEMO_MODE:
             add_premium(user_id, days)
+            if user_id in referrals and referrals[user_id].get('invited_by'):
+                referrer_id = referrals[user_id]['invited_by']
+                add_premium(referrer_id, 5)
+                try:
+                    username = event.sender.username or str(user_id)
+                    await bot.send_message(referrer_id, txt(referrer_id, 'referral_reward_purchase', username=username))
+                except:
+                    pass
             expiry_date = datetime.now() + timedelta(days=days)
-            await event.edit(txt(user_id, 'payment_success', days=days),
+            await event.edit(txt(user_id, 'payment_success', days=days,
+                                 expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
                              buttons=[[Button.inline(txt(user_id, 'search'), b'search')],
                                       [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]])
         else:
-            await event.answer('⚠️ Оплата в разработке', alert=True)
+            await event.answer('⚠️ Реальная оплата звёздами пока в разработке. Свяжитесь с администратором.', alert=True)
         return
 
     if data == 'favorites_full':
@@ -626,7 +716,7 @@ async def handle_promo(event):
         await event.reply(txt(user_id, 'promo_used'))
         return
     if user_id in used_promocodes and code in used_promocodes[user_id]:
-        await event.reply('❌ Вы уже активировали этот промокод')
+        await event.reply(txt(user_id, 'promo_already_used'))
         return
     promo['used'] += 1
     reward = promo['reward']
@@ -637,7 +727,9 @@ async def handle_promo(event):
         used_promocodes[user_id] = []
     used_promocodes[user_id].append(code)
     save_data()
-    await event.reply(txt(user_id, 'promo_success'))
+    expiry_date = datetime.now() + timedelta(days=days)
+    await event.reply(txt(user_id, 'promo_success', days=days,
+                          expiry=expiry_date.strftime('%d.%m.%Y %H:%M')))
 
 @bot.on(events.NewMessage(pattern='/create_promo .+ .+'))
 async def create_promo(event):
@@ -659,8 +751,11 @@ async def create_promo(event):
         await event.reply('❌ Формат: /create_promo [кол-во_активаций] [награда]\nНаграды: premium_1, premium_10, premium_15, premium_30')
 
 # ==================== ЗАПУСК ====================
-print('🤖 Бот запущен!')
+print('🤖 Бот запущен через прокси!')
+print(f'Прокси: {PROXY_SERVER}:{PROXY_PORT}')
+print('Лимиты: 5 букв — 10/день, 6 букв — 50/день')
 print('Для создания промокода: /create_promo 5 premium_30')
+print(f'Демо-режим: {"ВКЛЮЧЕН" if DEMO_MODE else "ВЫКЛЮЧЕН"}')
 
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.start()

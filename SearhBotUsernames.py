@@ -28,7 +28,7 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
-DEMO_MODE = True  # Временно включим демо, чтобы протестировать поиск
+DEMO_MODE = Fales  # Временно включим демо, чтобы протестировать поиск
 
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}

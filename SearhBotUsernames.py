@@ -1,12 +1,14 @@
 from flask import Flask
 import threading
 import os
+import asyncio
 import random
 import string
 import requests
 import json
 from datetime import datetime, timedelta
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events, Button, errors
+from telethon.errors import FloodWaitError
 
 app = Flask(__name__)
 
@@ -26,9 +28,13 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
+# ========== НАСТРОЙКИ ==========
+DEMO_MODE = False  # ⚠️ Премиум ПЛАТНЫЙ!
+
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
 
+# ========== ХРАНИЛИЩА ==========
 user_settings = {}
 user_favorites = {}
 user_premium = {}
@@ -71,11 +77,12 @@ if os.path.exists('bot.session'):
 
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# ========== ТЕКСТЫ ==========
+# ========== ТЕКСТЫ (ТОЛЬКО РУССКИЙ) ==========
 T = {
-    'welcome': '🌸 Добро пожаловать!',
+    'welcome': '🌸 Добро пожаловать, это бот для поиска крутых юзернеймов! 💎',
     'premium_status': '👑 Премиум: {status}',
-    'limits': '📊 Лимиты:\n🔹 5 букв: {searches_5}\n🔹 6 букв: {searches_6}',
+    'premium_remaining': '⏳ Осталось: {time}',
+    'limits': '📊 Лимиты поиска:\n🔹 5 букв: {searches_5}\n🔹 6 букв: {searches_6}',
     'choose_function': 'Выбери функцию:',
     'search': '🔍 Поиск',
     'favorites': '⭐ Избранное',
@@ -83,63 +90,73 @@ T = {
     'promocode': '🎟 Промокод',
     'settings': '⚙️ Настройки',
     'referral': '👥 Рефералы',
-    'searching': '🔍 Ищу...',
-    'found': '✅ Найден: @{username}',
-    'no_free': '😔 Не найдено',
-    'add_fav': '⭐ Добавить',
-    'remove_fav': '🗑 Убрать',
-    'find_more': '🔄 Ещё',
-    'favorites_title': '⭐ Избранное:',
-    'no_favorites': '⭐ Пусто',
+    'searching': '🔍 Ищу свободный юзернейм... Подождите секунду...',
+    'found': '✅ Найден свободный юзернейм!\n\n@{username}\n\n📊 На фрагменте — {fragment}\n\n⭐ В избранном: {faved} ({count}/5)',
+    'remaining': '📊 Осталось поисков: {remaining}',
+    'no_free': '😔 Не удалось найти свободный юзернейм. Попробуйте изменить настройки.',
+    'limit_reached': '⛔ Лимит поиска исчерпан!\n\nВы использовали все {limit} попыток для {length}-буквенных юзов.\n\n⏳ Восстановление через: {time}\n🕐 {reset_time}\n\n💎 Купите премиум для безлимитного поиска!',
+    'add_fav': '⭐ Добавить в избранное',
+    'remove_fav': '🗑 Убрать из избранного',
+    'find_more': '🔄 Найти ещё',
+    'favorites_title': '⭐ Твои сохранённые юзернеймы (макс 5):',
+    'no_favorites': '⭐ В избранном пока пусто\n\nНайди крутой юз и сохрани его!',
     'settings_title': '⚙️ Настройки',
-    'settings_length': '📏 Букв: {length}',
+    'settings_length': '📏 Количество букв: {length}',
     'settings_digits': '🔢 Цифры: {digits}',
+    'choose_length': '📏 Выберите количество букв:',
     'length_5': '5 букв',
     'length_6': '6 букв',
     'digits_on': 'Включить цифры',
     'digits_off': 'Выключить цифры',
     'back': '🔙 Назад',
     'main_menu': '🏠 Главная',
-    'premium_title': '💎 Премиум',
-    'premium_active': '✅ Активен',
-    'premium_inactive': '❌ Не активен',
-    'choose_days': 'Выбери срок:',
+    'premium_title': '💎 Премиум магазин',
+    'premium_active': '✅ Премиум активен',
+    'premium_inactive': '❌ Премиум не активен',
+    'premium_features': '🔥 Что даёт премиум:\n• ♾ Безлимитный поиск (5 и 6 букв)\n• 🚀 Приоритетная генерация\n• 🎁 Бонусные промокоды',
+    'choose_days': 'Выберите срок:',
     'buy_premium': '📅 {days} дней — {price} ⭐',
-    'confirm_payment': '💎 Оплата {days} дней — {price} ⭐',
-    'pay_stars': '⭐ Оплатить',
-    'payment_success': '✅ Премиум активирован!',
-    'promo_title': '🎟 Введи промокод: /promo КОД',
-    'promo_success': '✅ Промокод активирован!',
-    'promo_invalid': '❌ Неверный код',
-    'promo_used': '❌ Код исчерпан',
-    'promo_already_used': '❌ Ты уже использовал',
-    'referral_title': '👥 Рефералы',
-    'referral_link': '🔗 Твоя ссылка: https://t.me/{bot}?start={ref_code}',
-    'referral_stats': '📊 Приглашено: {count}',
+    'confirm_payment': '💎 Оплата премиума\n\n📅 Срок: {days} дней\n💰 Цена: {price} ⭐\n\nНажмите кнопку ниже для оплаты:',
+    'pay_stars': '⭐ Оплатить звёздами',
+    'payment_success': '✅ Премиум активирован на {days} дней!\n\n⏳ Действует до: {expiry}\n\n🔓 Открыт безлимитный поиск!',
+    'promo_title': '🎟 Промокоды\n\nВведите промокод в чат.\n\nПример: /promo ABC12345',
+    'promo_success': '✅ Промокод активирован!\n\n🎁 Получен премиум на {days} дней!\n⏳ Действует до: {expiry}\n\n🔓 Теперь у вас безлимитный поиск!',
+    'promo_invalid': '❌ Неверный промокод',
+    'promo_used': '❌ Количество активаций промокода исчерпано.',
+    'promo_already_used': '❌ Вы уже активировали этот промокод ранее.',
+    'referral_title': '👥 Реферальная система',
+    'referral_link': '🔗 Твоя реферальная ссылка:\nhttps://t.me/{bot}?start={ref_code}',
+    'referral_stats': '📊 Приглашено: {count} человек',
+    'referral_reward': '🎁 За 10 приглашённых — премиум на 1 день!\n🎁 За покупку премиума рефералом — +5 дней тебе!',
+    'referral_joined': '👤 Пользователь @{username} присоединился по вашей ссылке!',
+    'referral_reward_10': '🎉 Вы пригласили 10 человек! Получите премиум на 1 день!',
+    'referral_reward_purchase': '🎉 Ваш реферал @{username} купил премиум! Вы получили +5 дней!',
     'faved_yes': '✅ Да',
     'faved_no': '❌ Нет',
     'digits_on_text': 'Включены ✅',
     'digits_off_text': 'Выключены ❌',
-    'favorites_full': '⚠️ Максимум 5',
-    'no_referrals': '👥 Нет рефералов',
-    'referral_code': '🔑 Код: {code}',
-    'premium_already': '✅ Уже есть премиум',
+    'favorites_full': '⚠️ Максимум 5 юзов в избранном! Удалите лишние.',
+    'no_referrals': '👥 У вас пока нет рефералов.\n\nПриглашайте друзей и получайте бонусы!',
+    'referral_code': '🔑 Ваш реферальный код: {code}',
+    'set_lang': '🌐 Язык установлен: русский',
+    'premium_already': '✅ У вас уже есть премиум!',
     'friends': '👥 Друзья',
-    'referral_friends': '👥 Список:',
-    'no_referral_friends': 'Пока никого',
+    'referral_friends': '👥 Список приглашённых:',
+    'no_referral_friends': 'Пока никого не пригласили',
     'fragment_detected': 'обнаружен ✅',
     'fragment_not_detected': 'не обнаружен ❌',
-    'fragment_error': 'ошибка ⚠️',
-    'subscribe_required': f'🔥 Подпишись: https://t.me/{CHANNEL_USERNAME}',
+    'fragment_error': 'не удалось проверить ⚠️',
+    'subscribe_required': f'🔥 Чтобы пользоваться ботом, подпишись на наш канал:\n👉 https://t.me/{CHANNEL_USERNAME}\n\nПосле подписки нажми кнопку "Проверить ✅"',
     'check_subscription': 'Проверить ✅',
-    'subscription_success': '✅ Спасибо!',
-    'subscription_failed': '❌ Подпишись сначала',
+    'subscription_success': '✅ Спасибо за подписку! Теперь вы можете пользоваться ботом.',
+    'subscription_failed': '❌ Вы ещё не подписались на канал. Пожалуйста, подпишитесь и нажмите кнопку снова.',
+    'payment_error': '⚠️ Реальная оплата звёздами пока в разработке. Свяжитесь с администратором.'
 }
 
 def txt(user_id, key, **kwargs):
     return T.get(key, key).format(**kwargs) if kwargs else T.get(key, key)
 
-# ========== ФУНКЦИИ ==========
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def has_premium(user_id):
     if user_id not in user_premium:
         return False
@@ -152,6 +169,21 @@ def has_premium(user_id):
         save_data()
         return False
     return True
+
+def get_premium_remaining(user_id):
+    if user_id not in user_premium:
+        return None
+    expiry = user_premium[user_id].get('expires')
+    if not expiry:
+        return None
+    expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+    remaining = expiry_date - datetime.now()
+    if remaining.total_seconds() < 0:
+        return None
+    days = remaining.days
+    hours = remaining.seconds // 3600
+    minutes = (remaining.seconds % 3600) // 60
+    return f"{days}д {hours}ч {minutes}м"
 
 def add_premium(user_id, days):
     expiry_date = datetime.now() + timedelta(days=days)
@@ -238,26 +270,22 @@ def generate_username(length, with_digits=False):
     rest = ''.join(random.choices(chars, k=length-1))
     return first + rest
 
-# ========== ГЛАВНОЕ: ПРОВЕРКА ЮЗЕРНЕЙМА ЧЕРЕЗ requests ==========
 def is_username_free_sync(username):
-    """Проверяет, свободен ли юзернейм через requests"""
+    """Проверяет через t.me"""
     try:
         url = f'https://t.me/{username}'
         response = requests.get(url, timeout=5)
-        # Если страница существует и не перенаправляет на поиск — юз занят
         if response.status_code == 200:
-            # Если в тексте есть "If you have Telegram, you can contact" — юз свободен
             if "If you have Telegram, you can contact" in response.text:
                 return True
             else:
                 return False
         else:
-            return True  # Если страница не найдена — юз свободен
+            return True
     except:
-        return False  # Если ошибка — считаем, что юз занят (чтобы не спамить)
+        return False
 
 async def is_username_free(username):
-    """Асинхронная обёртка для синхронной функции"""
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, is_username_free_sync, username)
     return result
@@ -269,6 +297,16 @@ def check_fragment(username):
         return 'fragment_detected' if response.status_code == 200 else 'fragment_not_detected'
     except:
         return 'fragment_error'
+
+async def is_subscribed(user_id):
+    try:
+        channel = await bot.get_entity(f'@{CHANNEL_USERNAME}')
+        await bot.get_permissions(channel, user_id)
+        return True
+    except errors.rpcerrorlist.UserNotParticipantError:
+        return False
+    except:
+        return True
 
 def generate_ref_code(user_id):
     return f"{user_id}{random.randint(100, 999)}"
@@ -311,14 +349,30 @@ async def start(event):
         referrals[user_id] = {'invited': [], 'invited_by': None}
         save_data()
 
-    await send_main_menu(event, user_id, edit=False)
+    if await is_subscribed(user_id):
+        await send_main_menu(event, user_id, edit=False)
+    else:
+        text = txt(user_id, 'subscribe_required')
+        buttons = [[Button.inline(txt(user_id, 'check_subscription'), b'check_sub')]]
+        await event.respond(text, buttons=buttons)
+
+@bot.on(events.CallbackQuery(data=b'check_sub'))
+async def check_sub(event):
+    user_id = event.sender_id
+    if await is_subscribed(user_id):
+        await event.edit(txt(user_id, 'subscription_success'))
+        await send_main_menu(event, user_id, edit=False)
+    else:
+        await event.answer(txt(user_id, 'subscription_failed'), alert=True)
 
 async def send_main_menu(event, user_id, edit=True):
     premium_status = '✅ Активен' if has_premium(user_id) else '❌ Не активен'
+    remaining_rem = get_premium_remaining(user_id) if has_premium(user_id) else None
     searches_5, _ = get_remaining(user_id, 5)
     searches_6, _ = get_remaining(user_id, 6)
     text = (txt(user_id, 'welcome') + '\n\n' +
             txt(user_id, 'premium_status', status=premium_status) +
+            (('\n' + txt(user_id, 'premium_remaining', time=remaining_rem)) if remaining_rem else '') +
             '\n\n' + txt(user_id, 'limits', searches_5=str(searches_5), searches_6=str(searches_6)) +
             '\n\n' + txt(user_id, 'choose_function'))
     buttons = [
@@ -334,7 +388,7 @@ async def send_main_menu(event, user_id, edit=True):
     else:
         await event.respond(text, buttons=buttons)
 
-# ========== ГЛАВНЫЙ ОБРАБОТЧИК ПОИСКА ==========
+# ========== ОБРАБОТЧИК ПОИСКА ==========
 @bot.on(events.CallbackQuery(data=b'search'))
 async def search_callback(event):
     user_id = event.sender_id
@@ -364,7 +418,7 @@ async def search_callback(event):
     await event.edit(txt(user_id, 'searching'))
 
     found = None
-    for _ in range(50):  # 50 попыток
+    for _ in range(50):
         username = generate_username(length, digits)
         free = await is_username_free(username)
         if free is True:
@@ -405,7 +459,7 @@ async def search_callback(event):
         await event.edit(txt(user_id, 'no_free'),
                          buttons=[[Button.inline(txt(user_id, 'settings'), b'settings')]])
 
-# ========== ОСТАЛЬНЫЕ ОБРАБОТЧИКИ (упрощённо) ==========
+# ========== КНОПКИ ==========
 @bot.on(events.CallbackQuery)
 async def callback(event):
     user_id = event.sender_id
@@ -440,9 +494,13 @@ async def callback(event):
 
     if data == 'premium_shop':
         has_prem = has_premium(user_id)
+        remaining = get_premium_remaining(user_id) if has_prem else None
         text = txt(user_id, 'premium_title') + '\n\n'
         text += txt(user_id, 'premium_active') if has_prem else txt(user_id, 'premium_inactive')
-        text += '\n\n' + txt(user_id, 'choose_days')
+        if remaining:
+            text += '\n⏳ ' + txt(user_id, 'premium_remaining', time=remaining)
+        text += '\n\n' + txt(user_id, 'premium_features') + '\n\n'
+        text += txt(user_id, 'choose_days')
         buttons = []
         for days in sorted(PREMIUM_PRICES.keys()):
             price = PREMIUM_PRICES[days]
@@ -464,7 +522,8 @@ async def callback(event):
         text = (txt(user_id, 'referral_title') + '\n\n' +
                 txt(user_id, 'referral_link', bot=BOT_USERNAME, ref_code=ref_code) + '\n\n' +
                 txt(user_id, 'referral_code', code=ref_code) + '\n\n' +
-                txt(user_id, 'referral_stats', count=invited_count))
+                txt(user_id, 'referral_stats', count=invited_count) + '\n\n' +
+                txt(user_id, 'referral_reward'))
         buttons = [
             [Button.inline(txt(user_id, 'friends'), b'referral_friends')],
             [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]
@@ -616,6 +675,7 @@ async def callback(event):
         await event.edit(text, buttons=buttons)
         return
 
+    # ========== ПЛАТНЫЙ ПРЕМИУМ ==========
     if data.startswith('buy_premium_'):
         days = int(data.replace('buy_premium_', ''))
         price = PREMIUM_PRICES.get(days)
@@ -635,12 +695,8 @@ async def callback(event):
         if has_premium(user_id):
             await event.answer(txt(user_id, 'premium_already'), alert=True)
             return
-        add_premium(user_id, days)
-        expiry_date = datetime.now() + timedelta(days=days)
-        await event.edit(txt(user_id, 'payment_success', days=days,
-                             expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
-                         buttons=[[Button.inline(txt(user_id, 'search'), b'search')],
-                                  [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]])
+        # Реальная оплата звёздами — пока в разработке
+        await event.answer(txt(user_id, 'payment_error'), alert=True)
         return
 
     if data == 'favorites_full':
@@ -696,7 +752,10 @@ async def create_promo(event):
 
 # ========== ЗАПУСК ==========
 print('🤖 Бот запущен!')
+print(f'Канал для подписки: @{CHANNEL_USERNAME}')
+print('Лимиты: 5 букв — 10/день, 6 букв — 50/день (сброс через 24 часа)')
 print('Для создания промокода: /create_promo 5 premium_30')
+print(f'Демо-режим: {"ВКЛЮЧЕН" if DEMO_MODE else "ВЫКЛЮЧЕН"}')
 
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.start()

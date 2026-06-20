@@ -29,7 +29,7 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 
 # ========== НАСТРОЙКИ ==========
-DEMO_MODE = False  # True — демо-режим (бесплатно), False — реальная оплата
+DEMO_MODE = False  # ⚠️ ВЫКЛЮЧЕН — премиум платный!
 
 # ========== ЛИМИТЫ И ЦЕНЫ ==========
 LIMITS = {5: 10, 6: 50}
@@ -639,9 +639,8 @@ async def callback(event):
                              buttons=[[Button.inline(get_text(user_id, 'search'), b'search')],
                                       [Button.inline(get_text(user_id, 'main_menu'), b'main_menu')]])
         else:
-            # Реальная оплата звёздами
-            # Здесь нужно интегрировать Telegram Stars API
-            await event.answer('⚠️ Реальная оплата в разработке' if get_lang(user_id) == 'ru' else '⚠️ Real payment in development', alert=True)
+            # Реальная оплата звёздами — здесь нужно интегрировать Telegram Stars API
+            await event.answer('⚠️ Реальная оплата звёздами пока в разработке. Свяжитесь с администратором.' if get_lang(user_id) == 'ru' else '⚠️ Real payment with Stars is under development. Contact admin.', alert=True)
         return
     
     if data == 'favorites_full':
@@ -893,6 +892,7 @@ async def create_promo(event):
 print('🤖 Бот запущен!')
 print('Лимиты: 5 букв — 10/день, 6 букв — 50/день')
 print('Для создания промокода: /create_promo 5 premium_30')
+print(f'Демо-режим: {"ВКЛЮЧЕН" if DEMO_MODE else "ВЫКЛЮЧЕН"}')
 
 # Запускаем Flask в отдельном потоке
 flask_thread = threading.Thread(target=run_flask)

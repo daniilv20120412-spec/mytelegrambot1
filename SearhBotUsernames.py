@@ -9,7 +9,6 @@ import json
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button
 from telethon.errors import FloodWaitError
-from telethon.network.connection.tcpmtproxy import ConnectionTcpMTProxyAbridged
 
 app = Flask(__name__)
 
@@ -29,25 +28,13 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
-# ==================== НОВЫЙ ПРОКСИ ====================
-PROXY_SERVER = 'persian.gulf.ir.olsjddhf.info.'
-PROXY_PORT = 88
-PROXY_SECRET = 'ee0000f00f0f775555fffffff5006e2e696d656469612e737465616d706f77657265642e636f6d'
-
 # ==================== НАСТРОЙКИ ====================
-DEMO_MODE = False  # ПРЕМИУМ ПЛАТНЫЙ!
-
+DEMO_MODE = True  # Включи демо, чтобы тестировать без оплаты
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
 
-# ==================== ПОДКЛЮЧЕНИЕ ЧЕРЕЗ ПРОКСИ ====================
-bot = TelegramClient(
-    'bot', 
-    API_ID, 
-    API_HASH,
-    connection=ConnectionTcpMTProxyAbridged,
-    proxy=(PROXY_SERVER, PROXY_PORT, PROXY_SECRET)
-).start(bot_token=BOT_TOKEN)
+# ==================== ПОДКЛЮЧЕНИЕ БЕЗ ПРОКСИ ====================
+bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # ==================== ХРАНИЛИЩА ====================
 user_settings = {}
@@ -258,12 +245,8 @@ def generate_username(length, with_digits=False):
 
 def is_username_free_sync(username):
     try:
-        proxies = {
-            'http': f'socks5://{PROXY_SERVER}:{PROXY_PORT}',
-            'https': f'socks5://{PROXY_SERVER}:{PROXY_PORT}'
-        }
         url = f'https://t.me/{username}'
-        response = requests.get(url, timeout=10, proxies=proxies)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             if "If you have Telegram, you can contact" in response.text:
                 return True
@@ -281,12 +264,8 @@ async def is_username_free(username):
 
 def check_fragment(username):
     try:
-        proxies = {
-            'http': f'socks5://{PROXY_SERVER}:{PROXY_PORT}',
-            'https': f'socks5://{PROXY_SERVER}:{PROXY_PORT}'
-        }
         url = f'https://fragment.com/username/{username}'
-        response = requests.get(url, timeout=5, proxies=proxies)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             return 'fragment_detected'
         else:
@@ -751,8 +730,7 @@ async def create_promo(event):
         await event.reply('❌ Формат: /create_promo [кол-во_активаций] [награда]\nНаграды: premium_1, premium_10, premium_15, premium_30')
 
 # ==================== ЗАПУСК ====================
-print('🤖 Бот запущен через прокси!')
-print(f'Прокси: {PROXY_SERVER}:{PROXY_PORT}')
+print('🤖 Бот запущен без прокси!')
 print('Лимиты: 5 букв — 10/день, 6 букв — 50/день')
 print('Для создания промокода: /create_promo 5 premium_30')
 print(f'Демо-режим: {"ВКЛЮЧЕН" if DEMO_MODE else "ВЫКЛЮЧЕН"}')

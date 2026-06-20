@@ -28,8 +28,7 @@ ADMIN_ID = 7408006155
 BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
-# ========== НАСТРОЙКИ ==========
-DEMO_MODE = False  # ⚠️ Премиум ПЛАТНЫЙ!
+DEMO_MODE = True  # Временно включим демо, чтобы протестировать поиск
 
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
@@ -77,7 +76,7 @@ if os.path.exists('bot.session'):
 
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# ========== ТЕКСТЫ (ТОЛЬКО РУССКИЙ) ==========
+# ========== ТЕКСТЫ ==========
 T = {
     'welcome': '🌸 Добро пожаловать, это бот для поиска крутых юзернеймов! 💎',
     'premium_status': '👑 Премиум: {status}',
@@ -270,25 +269,24 @@ def generate_username(length, with_digits=False):
     rest = ''.join(random.choices(chars, k=length-1))
     return first + rest
 
-def is_username_free_sync(username):
-    """Проверяет через t.me"""
-    try:
-        url = f'https://t.me/{username}'
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            if "If you have Telegram, you can contact" in response.text:
-                return True
-            else:
-                return False
-        else:
-            return True
-    except:
-        return False
-
+# ========== НОВАЯ ФУНКЦИЯ ПРОВЕРКИ ЧЕРЕЗ TELEGRAM API ==========
 async def is_username_free(username):
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, is_username_free_sync, username)
-    return result
+    """Проверяет, свободен ли юзернейм через Telegram API"""
+    try:
+        # Пробуем получить информацию о пользователе
+        await bot.get_entity(f'@{username}')
+        return False  # Если получили — значит занят
+    except FloodWaitError as e:
+        # Если Telegram говорит ждать — ждём и пробуем ещё раз
+        await asyncio.sleep(e.seconds)
+        return None
+    except ValueError:
+        # Если ValueError — значит юзернейм свободен
+        return True
+    except Exception as e:
+        # Если другая ошибка — считаем, что юзернейм занят (чтобы не спамить)
+        print(f"Ошибка проверки @{username}: {e}")
+        return False
 
 def check_fragment(username):
     try:
@@ -388,7 +386,7 @@ async def send_main_menu(event, user_id, edit=True):
     else:
         await event.respond(text, buttons=buttons)
 
-# ========== ОБРАБОТЧИК ПОИСКА ==========
+# ========== ГЛАВНЫЙ ОБРАБОТЧИК ПОИСКА ==========
 @bot.on(events.CallbackQuery(data=b'search'))
 async def search_callback(event):
     user_id = event.sender_id
@@ -418,13 +416,16 @@ async def search_callback(event):
     await event.edit(txt(user_id, 'searching'))
 
     found = None
-    for _ in range(50):
+    for _ in range(30):  # 30 попыток, чтобы не перегружать API
         username = generate_username(length, digits)
         free = await is_username_free(username)
         if free is True:
             found = username
             break
-        await asyncio.sleep(0.2)
+        elif free is None:
+            # Если был FloodWaitError — ждём и продолжаем
+            continue
+        await asyncio.sleep(0.5)  # Задержка между запросами
 
     increment_search(user_id, length)
 
@@ -459,7 +460,7 @@ async def search_callback(event):
         await event.edit(txt(user_id, 'no_free'),
                          buttons=[[Button.inline(txt(user_id, 'settings'), b'settings')]])
 
-# ========== КНОПКИ ==========
+# ========== ОСТАЛЬНЫЕ КНОПКИ ==========
 @bot.on(events.CallbackQuery)
 async def callback(event):
     user_id = event.sender_id
@@ -675,7 +676,6 @@ async def callback(event):
         await event.edit(text, buttons=buttons)
         return
 
-    # ========== ПЛАТНЫЙ ПРЕМИУМ ==========
     if data.startswith('buy_premium_'):
         days = int(data.replace('buy_premium_', ''))
         price = PREMIUM_PRICES.get(days)
@@ -695,8 +695,13 @@ async def callback(event):
         if has_premium(user_id):
             await event.answer(txt(user_id, 'premium_already'), alert=True)
             return
-        # Реальная оплата звёздами — пока в разработке
-        await event.answer(txt(user_id, 'payment_error'), alert=True)
+        # ДЕМО-РЕЖИМ (для теста премиум активируется бесплатно)
+        add_premium(user_id, days)
+        expiry_date = datetime.now() + timedelta(days=days)
+        await event.edit(txt(user_id, 'payment_success', days=days,
+                             expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
+                         buttons=[[Button.inline(txt(user_id, 'search'), b'search')],
+                                  [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]])
         return
 
     if data == 'favorites_full':

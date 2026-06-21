@@ -29,7 +29,8 @@ BOT_USERNAME = 'Usernames2026searhbot'
 CHANNEL_USERNAME = 'usernames2026searh'
 
 # ==================== НАСТРОЙКИ ====================
-DEMO_MODE = True  # Включи демо, чтобы тестировать без оплаты
+DEMO_MODE = False  # <--- ПРЕМИУМ ПЛАТНЫЙ! БЕСПЛАТНО НЕ ДАЁТ!
+
 LIMITS = {5: 10, 6: 50}
 PREMIUM_PRICES = {1: 15, 10: 35, 15: 45, 30: 125}
 
@@ -149,6 +150,7 @@ T = {
     'check_subscription': 'Проверить ✅',
     'subscription_success': '✅ Спасибо за подписку! Теперь вы можете пользоваться ботом.',
     'subscription_failed': '❌ Вы ещё не подписались на канал. Пожалуйста, подпишитесь и нажмите кнопку снова.',
+    'payment_error': '⚠️ Реальная оплата звёздами пока в разработке. Свяжитесь с администратором.'
 }
 
 def txt(user_id, key, **kwargs):
@@ -637,7 +639,7 @@ async def callback(event):
         await event.edit(text, buttons=buttons)
         return
 
-    # ==================== ПЛАТНЫЙ ПРЕМИУМ ====================
+    # ==================== ПЛАТНЫЙ ПРЕМИУМ (БЕЗ ДЕМО) ====================
     if data.startswith('buy_premium_'):
         days = int(data.replace('buy_premium_', ''))
         price = PREMIUM_PRICES.get(days)
@@ -645,8 +647,6 @@ async def callback(event):
             await event.answer('❌ Неверный срок!', alert=True)
             return
         text = txt(user_id, 'confirm_payment', days=days, price=price)
-        if DEMO_MODE:
-            text += '\n\n⚠️ ДЕМО-РЕЖИМ: оплата бесплатна!'
         buttons = [
             [Button.inline(txt(user_id, 'pay_stars'), f'pay_stars_{days}'.encode())],
             [Button.inline(txt(user_id, 'back'), b'premium_shop')]
@@ -659,23 +659,8 @@ async def callback(event):
         if has_premium(user_id):
             await event.answer(txt(user_id, 'premium_already'), alert=True)
             return
-        if DEMO_MODE:
-            add_premium(user_id, days)
-            if user_id in referrals and referrals[user_id].get('invited_by'):
-                referrer_id = referrals[user_id]['invited_by']
-                add_premium(referrer_id, 5)
-                try:
-                    username = event.sender.username or str(user_id)
-                    await bot.send_message(referrer_id, txt(referrer_id, 'referral_reward_purchase', username=username))
-                except:
-                    pass
-            expiry_date = datetime.now() + timedelta(days=days)
-            await event.edit(txt(user_id, 'payment_success', days=days,
-                                 expiry=expiry_date.strftime('%d.%m.%Y %H:%M')),
-                             buttons=[[Button.inline(txt(user_id, 'search'), b'search')],
-                                      [Button.inline(txt(user_id, 'main_menu'), b'main_menu')]])
-        else:
-            await event.answer('⚠️ Реальная оплата звёздами пока в разработке. Свяжитесь с администратором.', alert=True)
+        # РЕАЛЬНАЯ ОПЛАТА — ПОКА В РАЗРАБОТКЕ
+        await event.answer(txt(user_id, 'payment_error'), alert=True)
         return
 
     if data == 'favorites_full':
